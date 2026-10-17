@@ -1,0 +1,31 @@
+.gitignore
+  s_3db16ee28df83b::t_15d31850007526 1-8
+.npmrc
+  s_3db16ee28df83b::t_2fbc1c565b9de0 1
+package.json
+  s_3db16ee28df83b::t_b1bbfb83673981 1-29
+pnpm-lock.yaml
+  s_3db16ee28df83b::t_e89894099547f9 1-1645
+pnpm-workspace.yaml
+  s_3db16ee28df83b::t_c6aba869e0c089 1-5
+tsconfig.json
+  s_3db16ee28df83b::t_8e75db1afc90c5 1-15
+worker-configuration.d.ts
+  s_3db16ee28df83b::t_21979d84b66c69 1-16274
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "812e63a50df16393fc7d6767891f69e8e62a063a",
+  "prompts": {},
+  "sessions": {
+    "s_3db16ee28df83b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "54a6248a-ae8b-4830-891f-efa34adff216",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
