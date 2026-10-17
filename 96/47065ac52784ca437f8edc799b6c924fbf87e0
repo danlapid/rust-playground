@@ -1,0 +1,69 @@
+toolchain/build-runtime.mjs
+  s_3db16ee28df83b::t_4a4a5f7c73c94e 1-173
+toolchain/build-rustc.sh
+  s_3db16ee28df83b::t_9cec1cef459059 1-130
+toolchain/build-std.sh
+  s_3db16ee28df83b::t_5ea036ab18baa8 1-67
+toolchain/import-rustc.mjs
+  s_3db16ee28df83b::t_6edf90840e8137 1-22
+toolchain/link-native.mjs
+  s_3db16ee28df83b::t_299039ea5bb897 1-41
+toolchain/lld/wasm-ld-main.cpp
+  s_3db16ee28df83b::t_312fb7f27d7cf9 1-11
+toolchain/proc-macro/shim.rs
+  s_3db16ee28df83b::t_52c18f2ff369b2 1-138
+toolchain/runtime/process-host.js
+  s_3db16ee28df83b::t_68d51c157ff869 1-108
+toolchain/rustc-patches/0001-Run-the-compiler-without-threads-on-hosts-that-lack-.patch
+  s_3db16ee28df83b::t_d5eaef72806c67 1-328
+toolchain/rustc-patches/0002-Link-with-wasm-ld-in-process-on-WebAssembly-hosts.patch
+  s_3db16ee28df83b::t_0e6bcc4d3b89cf 1-141
+toolchain/rustc-patches/0003-Allow-wasm-ld-as-the-linker-for-Emscripten-targets.patch
+  s_3db16ee28df83b::t_4336f115e86950 1-54
+toolchain/rustc-patches/0004-Build-rustc_driver-as-an-rlib-too-for-hosts-without-.patch
+  s_3db16ee28df83b::t_2b649789603fda 1-28
+toolchain/rustc-patches/0005-Give-Emscripten-hosts-a-default-sysroot.patch
+  s_3db16ee28df83b::t_45de6ed872a59d 1-43
+toolchain/rustc-patches/0006-Run-proc-macros-out-of-process-on-Emscripten-hosts.patch
+  s_3db16ee28df83b::t_f9184455d477e2 1-244
+toolchain/rustc-patches/0007-Read-crate-metadata-a-page-at-a-time-on-Emscripten-h.patch
+  s_3db16ee28df83b::t_43b5b5cbea46b7 1-672
+toolchain/rustc/crates/libc-0.2.183.patch
+  s_3db16ee28df83b::t_3f72aac499fddc 1-22
+toolchain/rustc/crates/object-0.37.3.patch
+  s_3db16ee28df83b::t_e26c0f3aab0eb4 1-20
+toolchain/rustc/emcc-link.sh
+  s_3db16ee28df83b::t_4aa0af6f46601c 1-20
+toolchain/rustc/remote-files.js
+  s_3db16ee28df83b::t_2badc1043b913d 1-48
+toolchain/stage.mjs
+  s_3db16ee28df83b::t_f9efaa684eb6df 1-75
+toolchain/std/libc-0.2.185.patch
+  s_3db16ee28df83b::t_75379a8b495925 1-87
+toolchain/std/std.patch
+  s_3db16ee28df83b::t_97ed46dbeda667 1-66
+toolchain/try-rustc.mjs
+  s_3db16ee28df83b::t_994a13bacea72d 1-101
+toolchain/build-lld.sh
+  s_3db16ee28df83b::t_6a612d5fcf80e9 1-64
+toolchain/runtime/process.c
+  s_3db16ee28df83b::t_eff71beec309c0 1-68
+toolchain/rustc/proc-macro-host.js
+  s_3db16ee28df83b::t_2cc93545395e43 1-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "9647065ac52784ca437f8edc799b6c924fbf87e0",
+  "prompts": {},
+  "sessions": {
+    "s_3db16ee28df83b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "54a6248a-ae8b-4830-891f-efa34adff216",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
