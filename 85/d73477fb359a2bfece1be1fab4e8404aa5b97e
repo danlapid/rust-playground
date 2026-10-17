@@ -1,0 +1,23 @@
+README.md
+  s_3db16ee28df83b::t_e8bf344be5d60f 1-173
+scripts/deploy.mjs
+  s_3db16ee28df83b::t_9a0de0fc57c4e5 1-39
+scripts/warm-cache.mjs
+  s_3db16ee28df83b::t_2ad80e7acfce44 1-76
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "85d73477fb359a2bfece1be1fab4e8404aa5b97e",
+  "prompts": {},
+  "sessions": {
+    "s_3db16ee28df83b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "54a6248a-ae8b-4830-891f-efa34adff216",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
