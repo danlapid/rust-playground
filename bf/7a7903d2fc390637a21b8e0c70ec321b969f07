@@ -1,0 +1,47 @@
+public/index.html
+  s_3db16ee28df83b::t_d83b48141aed84 1-833
+src/cargo/build.ts
+  s_3db16ee28df83b::t_e44d6bc440bbcd 1-481
+src/cargo/registry.ts
+  s_3db16ee28df83b::t_0b13dc633b5895 1-111
+src/cargo/resolve.ts
+  s_3db16ee28df83b::t_dbc9f3b09e7af9 1-236
+src/modules.d.ts
+  s_3db16ee28df83b::t_b17bd9e4d9caa7 1-24
+src/pipeline.ts
+  s_3db16ee28df83b::t_adc3ab818a6a32 1-123
+src/proc-macro/entry.js
+  s_3db16ee28df83b::t_50d89c249b47f7 1-59
+src/runner.ts
+  s_3db16ee28df83b::t_2b167ab27d541e 1-65
+src/runner/entry.js
+  s_3db16ee28df83b::t_d85c03389d5df9 1-79
+wrangler.jsonc
+  s_3db16ee28df83b::t_6f5b6f85d70171 1-21
+src/cargo/ar.ts
+  s_3db16ee28df83b::t_cf0a50ca0f77da 1-36
+src/cargo/cfg.ts
+  s_3db16ee28df83b::t_f69d4aaaf5027c 1-52
+src/cargo/crate.ts
+  s_3db16ee28df83b::t_89f1c588a42531 1-136
+src/cargo/semver.ts
+  s_3db16ee28df83b::t_af983eae3ad65d 1-109
+src/index.ts
+  s_3db16ee28df83b::t_0f3f213250bf21 1-41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "bf7a7903d2fc390637a21b8e0c70ec321b969f07",
+  "prompts": {},
+  "sessions": {
+    "s_3db16ee28df83b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "54a6248a-ae8b-4830-891f-efa34adff216",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
