@@ -1,0 +1,39 @@
+workers/compiler/src/generated.d.ts
+  s_3db16ee28df83b::t_1ee56fa8dc39bd 1-16
+workers/compiler/src/index.ts
+  s_3db16ee28df83b::t_f2441b2979d081 1-374
+workers/compiler/src/sysroot.ts
+  s_3db16ee28df83b::t_1141d0e62467e3 1-76
+workers/compiler/wrangler.jsonc
+  s_3db16ee28df83b::t_47e3deded0ce06 1-26
+workers/linker/src/generated.d.ts
+  s_3db16ee28df83b::t_2d3e35715654ef 1-12
+workers/linker/src/index.ts
+  s_3db16ee28df83b::t_e251a6d1f135ee 1-75
+workers/linker/wrangler.jsonc
+  s_3db16ee28df83b::t_402e723b491059 1-13
+workers/sysroot/src/generated.d.ts
+  s_3db16ee28df83b::t_75577e7fdb015f 1-4
+workers/sysroot/src/index.ts
+  s_3db16ee28df83b::t_1a72f04080ba55 1-48
+workers/sysroot/wrangler.jsonc
+  s_3db16ee28df83b::t_44c17ed688b013 1-11
+workers/compiler/src/paged.ts
+  s_3db16ee28df83b::t_0ba48f634e45e7 1-97
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "696ce2344ffa8747bb9e8412c2412c580555982a",
+  "prompts": {},
+  "sessions": {
+    "s_3db16ee28df83b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "54a6248a-ae8b-4830-891f-efa34adff216",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
