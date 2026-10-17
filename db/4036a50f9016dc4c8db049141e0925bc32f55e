@@ -1,0 +1,41 @@
+test/compile.test.ts
+  s_3db16ee28df83b::t_11c88a2a83cc43 1-74
+test/crates.test.ts
+  s_3db16ee28df83b::t_a5c84d7e2cfd40 1-82
+test/fixtures/exit.rs
+  s_3db16ee28df83b::t_a5540988a70bb6 1-4
+test/fixtures/hello.rs
+  s_3db16ee28df83b::t_5b83103d35fd07 1-13
+test/fixtures/panic.rs
+  s_3db16ee28df83b::t_9f08459e48a4f5 1-7
+test/fixtures/stdin.rs
+  s_3db16ee28df83b::t_4f5e2192fb52bf 1-6
+test/global-setup.ts
+  s_3db16ee28df83b::t_8f0576979aa729 1-37
+test/link.test.ts
+  s_3db16ee28df83b::t_d71344fa84da3c 1-41
+test/run.test.ts
+  s_3db16ee28df83b::t_0a9c035adad6ca 1-50
+test/workers.ts
+  s_3db16ee28df83b::t_fbd254eff1797e 1-73
+vitest.config.ts
+  s_3db16ee28df83b::t_81515fefa62dd6 1-17
+test/cargo.test.ts
+  s_3db16ee28df83b::t_52194cf9cd77d5 1-149
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "db4036a50f9016dc4c8db049141e0925bc32f55e",
+  "prompts": {},
+  "sessions": {
+    "s_3db16ee28df83b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "54a6248a-ae8b-4830-891f-efa34adff216",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
