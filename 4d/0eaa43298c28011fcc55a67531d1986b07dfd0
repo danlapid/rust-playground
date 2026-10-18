@@ -1,0 +1,33 @@
+src/cache.ts
+  s_3db16ee28df83b::t_612f03e013b024 1-201
+src/cargo/build.ts
+  s_3db16ee28df83b::t_1b28bfbae0ef52 13,16,35-38,115-175,235-250,253,298-300,303,310,338-340,347-360,369-378,381,441,451
+src/index.ts
+  s_3db16ee28df83b::t_29c495db4457a7 4-5,40-58
+src/pipeline.ts
+  s_3db16ee28df83b::t_6d19db31bce74f 2-3,5-6,8,36-37,50-72,75-86,92,107-118,123,128-131,133-152,154-158,160-162,166-168
+src/runner.ts
+  s_3db16ee28df83b::t_a3af9abfe28258 4-6
+test/compile.test.ts
+  s_3db16ee28df83b::t_5dd56c07fe1441 34-46,87-103
+src/events.ts
+  s_3db16ee28df83b::t_d44c0352240bda 1-21
+wrangler.jsonc
+  s_3db16ee28df83b::t_938a4105bf4892 17-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "4d0eaa43298c28011fcc55a67531d1986b07dfd0",
+  "prompts": {},
+  "sessions": {
+    "s_3db16ee28df83b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "54a6248a-ae8b-4830-891f-efa34adff216",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
