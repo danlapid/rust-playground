@@ -1,0 +1,37 @@
+{
+  "name": "rust-playground",
+  "description": "Rust, compiled and run on Cloudflare Workers: rustc built for wasm32-unknown-emscripten, with crates.io dependencies, build scripts and proc macros",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "toolchain": "pnpm toolchain:lld && pnpm toolchain:rustc && pnpm toolchain:std && pnpm toolchain:runtime && pnpm toolchain:stage",
+    "toolchain:lld": "toolchain/build-lld.sh",
+    "toolchain:rustc": "toolchain/build-rustc.sh && node toolchain/import-rustc.mjs",
+    "toolchain:std": "toolchain/build-std.sh",
+    "toolchain:runtime": "node toolchain/build-runtime.mjs",
+    "toolchain:stage": "node toolchain/stage.mjs",
+    "try-rustc": "node toolchain/try-rustc.mjs",
+    "dev": "wrangler dev -c wrangler.jsonc -c workers/compiler/wrangler.jsonc -c workers/linker/wrangler.jsonc",
+    "deploy": "node scripts/deploy.mjs",
+    "warm-cache": "node scripts/warm-cache.mjs",
+    "record-run": "node scripts/record-run.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "types": "wrangler types --config=wrangler.jsonc --config=workers/compiler/wrangler.jsonc --config=workers/linker/wrangler.jsonc"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.4.2",
+    "@types/node": "^24.19.2",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.0",
+    "wrangler": "4.151.0"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3",
+    "smol-toml": "^1.9.1"
+  }
+}

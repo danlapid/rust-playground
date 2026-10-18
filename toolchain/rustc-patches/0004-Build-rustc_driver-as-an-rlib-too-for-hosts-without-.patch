@@ -1,0 +1,28 @@
+From 5073539653a4737c91a4cf0cf7e011e86ee1f299 Mon Sep 17 00:00:00 2001
+From: rust-playground <rp@localhost>
+Date: Fri, 16 Oct 2026 18:32:11 -0400
+Subject: [PATCH 4/7] Build rustc_driver as an rlib too, for hosts without
+ dylibs
+
+---
+ compiler/rustc_driver/Cargo.toml | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/compiler/rustc_driver/Cargo.toml b/compiler/rustc_driver/Cargo.toml
+index 51909719..9320b198 100644
+--- a/compiler/rustc_driver/Cargo.toml
++++ b/compiler/rustc_driver/Cargo.toml
+@@ -4,7 +4,9 @@ version = "0.0.0"
+ edition = "2024"
+ 
+ [lib]
+-crate-type = ["dylib"]
++# `lib` too, for hosts without dynamic libraries (WebAssembly), where rustc-main links
++# it statically and rustc drops the `dylib` crate type.
++crate-type = ["lib", "dylib"]
+ 
+ [dependencies]
+ # tidy-alphabetical-start
+-- 
+2.56.0
+

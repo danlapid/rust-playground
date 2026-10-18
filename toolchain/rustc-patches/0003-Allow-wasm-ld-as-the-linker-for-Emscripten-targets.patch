@@ -1,0 +1,54 @@
+From 062879fda1a67de5366927f3aa61725575c68ae1 Mon Sep 17 00:00:00 2001
+From: rust-playground <rp@localhost>
+Date: Fri, 16 Oct 2026 18:31:00 -0400
+Subject: [PATCH 3/7] Allow wasm-ld as the linker for Emscripten targets
+
+Given the arguments emcc would pass it, wasm-ld links Emscripten output directly,
+for hosts where emcc (a Python program) cannot run.
+---
+ compiler/rustc_codegen_ssa/src/back/link.rs | 3 ++-
+ compiler/rustc_target/src/spec/mod.rs       | 7 +++++++
+ 2 files changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/compiler/rustc_codegen_ssa/src/back/link.rs b/compiler/rustc_codegen_ssa/src/back/link.rs
+index f008915b..beed42d3 100644
+--- a/compiler/rustc_codegen_ssa/src/back/link.rs
++++ b/compiler/rustc_codegen_ssa/src/back/link.rs
+@@ -2980,7 +2980,8 @@ fn add_order_independent_options(
+         cmd.no_crt_objects();
+     }
+ 
+-    if sess.target.os == Os::Emscripten {
++    // Not when linking with wasm-ld directly (see `LinkerFlavor::with_cli_hints`).
++    if sess.target.os == Os::Emscripten && flavor == LinkerFlavor::EmCc {
+         cmd.cc_arg("-fwasm-exceptions");
+     }
+ 
+diff --git a/compiler/rustc_target/src/spec/mod.rs b/compiler/rustc_target/src/spec/mod.rs
+index 5c19b35e..d6fa5f36 100644
+--- a/compiler/rustc_target/src/spec/mod.rs
++++ b/compiler/rustc_target/src/spec/mod.rs
+@@ -334,6 +334,10 @@ fn with_hints(self, (cc_hint, lld_hint): (Option<Cc>, Option<Lld>)) -> LinkerFla
+     }
+ 
+     pub fn with_cli_hints(self, cli: LinkerFlavorCli) -> LinkerFlavor {
++        // Emscripten output linked by wasm-ld directly (see `check_compatibility`).
++        if let (LinkerFlavor::EmCc, LinkerFlavorCli::WasmLld(cc)) = (self, cli) {
++            return LinkerFlavor::WasmLld(cc);
++        }
+         self.with_hints(LinkerFlavor::infer_cli_hints(cli))
+     }
+ 
+@@ -355,6 +359,9 @@ pub fn check_compatibility(self, cli: LinkerFlavorCli) -> Option<String> {
+                 | (LinkerFlavor::Unix(..), LinkerFlavorCli::Unix(..))
+                 | (LinkerFlavor::Msvc(..), LinkerFlavorCli::Msvc(..))
+                 | (LinkerFlavor::EmCc, LinkerFlavorCli::EmCc)
++                // Emscripten output can be linked by wasm-ld directly, given the
++                // arguments emcc would pass it (e.g. where emcc cannot run).
++                | (LinkerFlavor::EmCc, LinkerFlavorCli::WasmLld(..))
+                 | (LinkerFlavor::Bpf, LinkerFlavorCli::Bpf)
+                 | (LinkerFlavor::Llbc, LinkerFlavorCli::Llbc) => return true,
+                 _ => {}
+-- 
+2.56.0
+

@@ -1,0 +1,328 @@
+From 4af99380b89998b370f5bc6c5394df5a1754181e Mon Sep 17 00:00:00 2001
+From: rust-playground <rp@localhost>
+Date: Fri, 16 Oct 2026 18:31:00 -0400
+Subject: [PATCH 1/7] Run the compiler without threads on hosts that lack them
+
+rustc compiled to wasm32-unknown-emscripten without pthreads (e.g. running in a
+Cloudflare Worker) cannot spawn threads. Run the frontend on the main thread and
+defer the codegen coordinator to its join, running work items inline.
+RUSTC_NO_THREADS forces this mode elsewhere, to test it natively.
+---
+ compiler/rustc_codegen_llvm/src/llvm_util.rs  |   5 +-
+ compiler/rustc_codegen_ssa/src/back/write.rs  | 110 ++++++++++++++----
+ .../rustc_data_structures/src/jobserver.rs    |   6 +
+ compiler/rustc_data_structures/src/sync.rs    |  12 ++
+ compiler/rustc_interface/src/util.rs          |  12 ++
+ 5 files changed, 118 insertions(+), 27 deletions(-)
+
+diff --git a/compiler/rustc_codegen_llvm/src/llvm_util.rs b/compiler/rustc_codegen_llvm/src/llvm_util.rs
+index 73b7f699..e687d34a 100644
+--- a/compiler/rustc_codegen_llvm/src/llvm_util.rs
++++ b/compiler/rustc_codegen_llvm/src/llvm_util.rs
+@@ -27,8 +27,9 @@
+ 
+ pub(crate) fn init(sess: &Session) {
+     unsafe {
+-        // Before we touch LLVM, make sure that multithreading is enabled.
+-        if !llvm::LLVMIsMultithreaded().is_true() {
++        // Before we touch LLVM, make sure that multithreading is enabled (unless the
++        // compiler runs without threads itself, see `no_threads`).
++        if !llvm::LLVMIsMultithreaded().is_true() && !rustc_data_structures::sync::no_threads() {
+             bug!("LLVM compiled without support for threads");
+         }
+         INIT.call_once(|| {
+diff --git a/compiler/rustc_codegen_ssa/src/back/write.rs b/compiler/rustc_codegen_ssa/src/back/write.rs
+index de1adf02..20091741 100644
+--- a/compiler/rustc_codegen_ssa/src/back/write.rs
++++ b/compiler/rustc_codegen_ssa/src/back/write.rs
+@@ -8,6 +8,7 @@
+ use rustc_abi::Size;
+ use rustc_data_structures::jobserver::{self, Acquired};
+ use rustc_data_structures::profiling::{SelfProfilerRef, VerboseTimingGuard};
++use rustc_data_structures::sync::no_threads;
+ use rustc_errors::emitter::Emitter;
+ use rustc_errors::{
+     Diag, DiagArgMap, DiagCtxt, DiagCtxtHandle, DiagMessage, ErrCode, FatalError, FatalErrorMarker,
+@@ -1007,11 +1008,13 @@ fn do_thin_lto<B: WriteBackendMethods>(
+     // get tokens on `coordinator_receive` which will
+     // get managed in the main loop below.
+     let coordinator_send2 = coordinator_send.clone();
+-    let helper = jobserver::client()
+-        .into_helper_thread(move |token| {
+-            drop(coordinator_send2.send(ThinLtoMessage::Token(token)));
+-        })
+-        .expect("failed to spawn helper thread");
++    let helper = (!no_threads()).then(|| {
++        jobserver::client()
++            .into_helper_thread(move |token| {
++                drop(coordinator_send2.send(ThinLtoMessage::Token(token)));
++            })
++            .expect("failed to spawn helper thread")
++    });
+ 
+     let mut work_items = vec![];
+ 
+@@ -1032,7 +1035,7 @@ fn do_thin_lto<B: WriteBackendMethods>(
+             work_items.binary_search_by_key(&cost, |&(_, cost)| cost).unwrap_or_else(|e| e);
+         work_items.insert(insertion_index, (work, cost));
+         if cgcx.parallel {
+-            helper.request_token();
++            helper.as_ref().unwrap().request_token();
+         }
+     }
+ 
+@@ -1222,7 +1225,7 @@ fn start_executing_work<B: WriteBackendMethods>(
+     allocator_config: Arc<ModuleConfig>,
+     mut allocator_module: Option<ModuleCodegen<B::Module>>,
+     coordinator_send: Sender<Message<B>>,
+-) -> thread::JoinHandle<Result<MaybeLtoModules<B>, ()>> {
++) -> MaybeThread<Result<MaybeLtoModules<B>, ()>> {
+     let sess = tcx.sess;
+     let prof = sess.prof.clone();
+ 
+@@ -1236,11 +1239,13 @@ fn start_executing_work<B: WriteBackendMethods>(
+     // get tokens on `coordinator_receive` which will
+     // get managed in the main loop below.
+     let coordinator_send2 = coordinator_send.clone();
+-    let helper = jobserver::client()
+-        .into_helper_thread(move |token| {
+-            drop(coordinator_send2.send(Message::Token::<B>(token)));
+-        })
+-        .expect("failed to spawn helper thread");
++    let helper = (!no_threads()).then(|| {
++        jobserver::client()
++            .into_helper_thread(move |token| {
++                drop(coordinator_send2.send(Message::Token::<B>(token)));
++            })
++            .expect("failed to spawn helper thread")
++    });
+ 
+     let opt_level = tcx.backend_optimization_level(());
+     let backend_features = tcx.global_backend_features(()).clone();
+@@ -1281,7 +1286,9 @@ fn start_executing_work<B: WriteBackendMethods>(
+         target_is_like_gpu: tcx.sess.target.is_like_gpu,
+         split_debuginfo: tcx.sess.split_debuginfo(),
+         split_dwarf_kind: tcx.sess.opts.unstable_opts.split_dwarf_kind,
+-        parallel: backend.supports_parallel() && !sess.opts.unstable_opts.no_parallel_backend,
++        parallel: !no_threads()
++            && backend.supports_parallel()
++            && !sess.opts.unstable_opts.no_parallel_backend,
+         pointer_size: tcx.data_layout.pointer_size(),
+     };
+ 
+@@ -1491,7 +1498,10 @@ enum CodegenState {
+                     let additional_running = std::cmp::min(extra_tokens, work_items.len());
+                     let anticipated_running = running_with_own_token + additional_running + 1;
+ 
+-                    if !queue_full_enough(work_items.len(), anticipated_running) {
++                    // Without threads, every codegen message is already queued when
++                    // this loop runs, so the main thread is never lent out until
++                    // codegen completes.
++                    if no_threads() || !queue_full_enough(work_items.len(), anticipated_running) {
+                         // The queue is not full enough, process more codegen units:
+                         if codegen_worker_send.send(CguMessage).is_err() {
+                             panic!("Could not send CguMessage to main thread")
+@@ -1629,7 +1639,7 @@ enum CodegenState {
+                     work_items.insert(insertion_index, (llvm_work_item, cost));
+ 
+                     if cgcx.parallel {
+-                        helper.request_token();
++                        helper.as_ref().unwrap().request_token();
+                     }
+                     assert_eq!(main_thread_state, MainThreadState::Codegenning);
+                     main_thread_state = MainThreadState::Idle;
+@@ -1765,10 +1775,7 @@ enum CodegenState {
+             }),
+         }))
+     };
+-    return std::thread::Builder::new()
+-        .name("coordinator".to_owned())
+-        .spawn(f)
+-        .expect("failed to spawn coordinator thread");
++    return MaybeThread::spawn("coordinator", f);
+ 
+     // A heuristic that determines if we have enough LLVM WorkItems in the
+     // queue so that the main thread can do LLVM work instead of codegen
+@@ -1872,7 +1879,7 @@ fn spawn_work<'a, B: WriteBackendMethods>(
+         };
+         drop(coordinator_send.send(msg));
+     };
+-    std::thread::Builder::new().name(name).spawn(f).expect("failed to spawn work thread");
++    spawn_work_thread(name, f);
+ }
+ 
+ fn spawn_thin_lto_work<B: WriteBackendMethods>(
+@@ -1914,7 +1921,7 @@ fn spawn_thin_lto_work<B: WriteBackendMethods>(
+         };
+         drop(coordinator_send.send(msg));
+     };
+-    std::thread::Builder::new().name(name).spawn(f).expect("failed to spawn work thread");
++    spawn_work_thread(name, f);
+ }
+ 
+ enum SharedEmitterMessage {
+@@ -2063,9 +2070,51 @@ fn check(&self, sess: &Session, blocking: bool) {
+     }
+ }
+ 
++// Without threads (see `no_threads`), the coordinator runs when it is joined and work
++// items run inline. By then the main thread has queued all of its codegen messages, so
++// the coordinator first takes in every codegen unit, then lends the main thread's
++// implicit token to each work item in turn.
++
++/// A thread, or on hosts without threads, a closure run when joined.
++enum MaybeThread<T> {
++    Thread(thread::JoinHandle<T>),
++    Deferred(Box<dyn FnOnce() -> T + Send>),
++}
++
++impl<T: Send + 'static> MaybeThread<T> {
++    fn spawn(name: &str, f: impl FnOnce() -> T + Send + 'static) -> Self {
++        if no_threads() {
++            MaybeThread::Deferred(Box::new(f))
++        } else {
++            MaybeThread::Thread(
++                thread::Builder::new()
++                    .name(name.to_owned())
++                    .spawn(f)
++                    .unwrap_or_else(|e| panic!("failed to spawn {name} thread: {e}")),
++            )
++        }
++    }
++
++    fn join(self) -> thread::Result<T> {
++        match self {
++            MaybeThread::Thread(handle) => handle.join(),
++            MaybeThread::Deferred(f) => std::panic::catch_unwind(AssertUnwindSafe(f)),
++        }
++    }
++}
++
++/// Runs a work item's closure on its own thread, or inline on hosts without threads.
++fn spawn_work_thread(name: String, f: impl FnOnce() + Send + 'static) {
++    if no_threads() {
++        f()
++    } else {
++        thread::Builder::new().name(name).spawn(f).expect("failed to spawn work thread");
++    }
++}
++
+ pub struct Coordinator<B: WriteBackendMethods> {
+     sender: Sender<Message<B>>,
+-    future: Option<thread::JoinHandle<Result<MaybeLtoModules<B>, ()>>>,
++    future: Option<MaybeThread<Result<MaybeLtoModules<B>, ()>>>,
+     // Only used for the Message type.
+     phantom: PhantomData<B>,
+ }
+@@ -2100,9 +2149,17 @@ pub struct OngoingCodegen<B: WriteBackendMethods> {
+ 
+ impl<B: WriteBackendMethods> OngoingCodegen<B> {
+     pub fn join(self, sess: &Session, crate_info: &CrateInfo) -> (CompiledModules, WorkProductMap) {
+-        self.shared_emitter_main.check(sess, true);
++        // Without threads the coordinator only runs when it is joined, so its
++        // diagnostics are only complete after that.
++        if !no_threads() {
++            self.shared_emitter_main.check(sess, true);
++        }
++        let joined = sess.time("join_worker_thread", || self.coordinator.join());
++        if no_threads() {
++            self.shared_emitter_main.check(sess, true);
++        }
+ 
+-        let maybe_lto_modules = sess.time("join_worker_thread", || match self.coordinator.join() {
++        let maybe_lto_modules = match joined {
+             Ok(Ok(maybe_lto_modules)) => maybe_lto_modules,
+             Ok(Err(())) => {
+                 sess.dcx().abort_if_errors();
+@@ -2111,7 +2168,7 @@ pub fn join(self, sess: &Session, crate_info: &CrateInfo) -> (CompiledModules, W
+             Err(_) => {
+                 bug!("panic during codegen/LLVM phase");
+             }
+-        });
++        };
+ 
+         sess.dcx().abort_if_errors();
+ 
+@@ -2195,6 +2252,9 @@ pub(crate) fn check_for_errors(&self, sess: &Session) {
+     }
+ 
+     pub(crate) fn wait_for_signal_to_codegen_item(&self) {
++        if no_threads() {
++            return;
++        }
+         match self.codegen_worker_receive.recv() {
+             Ok(CguMessage) => {
+                 // Ok to proceed.
+diff --git a/compiler/rustc_data_structures/src/jobserver.rs b/compiler/rustc_data_structures/src/jobserver.rs
+index 3ed1ea75..caf51827 100644
+--- a/compiler/rustc_data_structures/src/jobserver.rs
++++ b/compiler/rustc_data_structures/src/jobserver.rs
+@@ -100,6 +100,11 @@ pub fn new() -> Arc<Self> {
+             wake_pending: Condvar::new(),
+             helper: OnceLock::new(),
+         });
++        // With one thread, a token is only ever requested after it was released (see
++        // `acquire_thread`), so there is nothing for a helper thread to do.
++        if crate::sync::no_threads() {
++            return proxy;
++        }
+         let proxy_ = Arc::clone(&proxy);
+         let helper = proxy
+             .client
+@@ -135,6 +140,7 @@ pub fn acquire_thread(&self) {
+             assert_eq!(data.pending, 0);
+             data.used += 1;
+         } else {
++            assert!(!crate::sync::no_threads(), "a second thread wants a jobserver token");
+             // Request a token from the helper thread. We can't directly use `acquire_raw`
+             // as we also need to be able to wait for the final token in the process which
+             // does not get a corresponding `release_raw` call.
+diff --git a/compiler/rustc_data_structures/src/sync.rs b/compiler/rustc_data_structures/src/sync.rs
+index 3d5bc852..946bf5e7 100644
+--- a/compiler/rustc_data_structures/src/sync.rs
++++ b/compiler/rustc_data_structures/src/sync.rs
+@@ -42,6 +42,18 @@
+     try_par_for_each_in,
+ };
+ pub use self::vec::{AppendOnlyIndexVec, AppendOnlyVec};
++
++/// Whether the host cannot spawn threads (Emscripten without pthreads, e.g. rustc
++/// running in a Cloudflare Worker). The compiler then runs entirely on the main thread.
++///
++/// `RUSTC_NO_THREADS` forces this on other hosts, to test it natively.
++pub fn no_threads() -> bool {
++    static NO_THREADS: std::sync::LazyLock<bool> = std::sync::LazyLock::new(|| {
++        cfg!(all(target_family = "wasm", not(target_feature = "atomics")))
++            || std::env::var_os("RUSTC_NO_THREADS").is_some()
++    });
++    *NO_THREADS
++}
+ pub use self::worker_local::{Registry, WorkerLocal};
+ pub use crate::marker::*;
+ 
+diff --git a/compiler/rustc_interface/src/util.rs b/compiler/rustc_interface/src/util.rs
+index c78e4190..549bbeb3 100644
+--- a/compiler/rustc_interface/src/util.rs
++++ b/compiler/rustc_interface/src/util.rs
+@@ -140,6 +140,18 @@ fn run_in_thread_with_globals<F: FnOnce(CurrentGcx, Arc<Proxy>) -> R + Send, R:
+     extra_symbols: &[&'static str],
+     f: F,
+ ) -> R {
++    // Hosts without threads run the compiler on the main thread. The stack size is set
++    // when linking the host binary instead.
++    if rustc_data_structures::sync::no_threads() {
++        let _ = thread_stack_size;
++        return rustc_span::create_session_globals_then(
++            edition,
++            extra_symbols,
++            Some(sm_inputs),
++            || f(CurrentGcx::new(), Proxy::new()),
++        );
++    }
++
+     // The "thread pool" is a single spawned thread in the non-parallel
+     // compiler. We run on a spawned thread instead of the main thread (a) to
+     // provide control over the stack size, and (b) to increase similarity with
+-- 
+2.56.0
+

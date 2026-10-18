@@ -1,0 +1,22 @@
+diff --git a/src/unix/linux_like/emscripten/mod.rs b/src/unix/linux_like/emscripten/mod.rs
+index 711ed8f..d0e68f5 100644
+--- a/src/unix/linux_like/emscripten/mod.rs
++++ b/src/unix/linux_like/emscripten/mod.rs
+@@ -1172,6 +1172,9 @@ pub const EXTPROC: crate::tcflag_t = 0x00010000;
+ 
+ pub const MAP_HUGETLB: c_int = 0x040000;
+ 
++pub const F_RDLCK: c_int = 0;
++pub const F_WRLCK: c_int = 1;
++pub const F_UNLCK: c_int = 2;
+ pub const F_GETLK: c_int = 12;
+ pub const F_GETOWN: c_int = 9;
+ pub const F_SETLK: c_int = 13;
+@@ -1329,6 +1332,7 @@ safe_f! {
+ }
+ 
+ extern "C" {
++    pub fn pthread_kill(thread: crate::pthread_t, sig: c_int) -> c_int;
+     pub fn getrlimit(resource: c_int, rlim: *mut crate::rlimit) -> c_int;
+     pub fn setrlimit(resource: c_int, rlim: *const crate::rlimit) -> c_int;
+     pub fn strerror_r(errnum: c_int, buf: *mut c_char, buflen: size_t) -> c_int;

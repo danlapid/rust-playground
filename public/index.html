@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rust Playground</title>
+<meta name="description" content="A Rust toolchain running entirely on Cloudflare Workers: rustc built for the Emscripten target, crates.io, build scripts and proc macros included. Watch each Worker at work, live.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@500;600;700&family=Martian+Mono:wdth,wght@75..112.5,300..600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script type="module" src="app/main.js"></script>
+</head>
+<body>
+<header class="top wrap">
+  <span class="mark">Rust Playground</span>
+  <nav><a href="#timeline">The run, to scale</a><a href="#how">How a run works</a><a href="#platform">The platform</a><a href="#changes">What it took</a></nav>
+</header>
+
+<section class="intro wrap">
+  <h1>Rust, compiled and run on Cloudflare Workers.</h1>
+  <p>rustc is built for Rust’s <code>wasm32-unknown-emscripten</code> target and runs in a Worker. <strong>Crates from crates.io build here too, build scripts and proc macros included</strong>, and every program runs in a Dynamic Worker of its own. Press Run and watch the panel: each Worker lights up as it works, and every cache lookup shows whether it hit.</p>
+</section>
+
+<main class="bench" aria-label="Playground">
+  <div class="tools">
+    <button class="run" id="run" title="Ctrl/⌘ + Enter">Run</button>
+    <button id="check" title="Ctrl/⌘ + Shift + Enter">Check</button>
+    <span class="grow"></span>
+    <label class="opt">Example <select id="example"></select></label>
+    <label class="opt">Edition
+      <select id="edition"><option>2024</option><option>2021</option><option>2018</option><option>2015</option></select>
+    </label>
+    <label class="opt">Build
+      <select id="opt"><option value="0">debug</option><option value="2">release</option></select>
+    </label>
+    <button id="max" aria-pressed="false" title="Fill the window with the playground (Esc to restore)">Maximize</button>
+  </div>
+  <div class="editor">
+    <div id="editor"></div>
+    <details class="stdin" id="stdin-box">
+      <summary>Standard input</summary>
+      <textarea id="stdin" spellcheck="false" aria-label="Standard input" placeholder="Lines for the program to read"></textarea>
+    </details>
+  </div>
+  <div class="console" id="out" aria-live="polite"></div>
+
+  <aside class="panel" aria-labelledby="panel-title">
+    <div class="panel-head">
+      <h2 id="panel-title">The Workers, live</h2>
+      <span class="state" id="panel-state">Idle</span>
+      <span class="clock num" id="clock" aria-hidden="true">0.0 s</span>
+    </div>
+    <ol class="line" id="line">
+      <li class="stn" data-stn="browser"><i class="lamp"></i><div class="name">Your browser</div><div class="role">Sends the code, and hears about each step as it happens</div></li>
+      <li class="stn" data-stn="playground"><i class="lamp"></i><div class="name">Playground Worker</div><div class="role">Resolves versions and plans the build</div><div class="doing"></div></li>
+      <li class="stn" data-stn="cache"><i class="lamp"></i><div class="name">Workers Cache</div><div class="role">Answers repeat work without running anything</div><div class="lookups" id="lookups"></div><div class="tally" id="tally"></div></li>
+      <li class="stn branch" data-stn="r2"><i class="lamp"></i><div class="name">R2</div><div class="role">Keeps every built crate and snippet</div></li>
+      <li class="stn" data-stn="crates"><i class="lamp"></i><div class="name">crates.io</div><div class="role">Crate downloads, kept in R2 after the first</div><div class="plates"></div></li>
+      <li class="stn" data-stn="compiler"><i class="lamp"></i><div class="name">Compiler Worker</div><div class="role">rustc, compiled to WebAssembly</div><div class="plates"></div></li>
+      <li class="stn branch" data-stn="assets"><i class="lamp"></i><div class="name">Static Assets</div><div class="role">std’s metadata, which rustc reads a page at a time</div></li>
+      <li class="stn" data-stn="linker"><i class="lamp"></i><div class="name">Linker Worker</div><div class="role">wasm-ld, for programs with crates</div><div class="plates"></div></li>
+      <li class="stn" data-stn="dynamic"><i class="lamp"></i><div class="name">Dynamic Workers</div><div class="role">Programs, build scripts and proc macros, with no network</div><div class="plates"></div></li>
+    </ol>
+    <div class="trains" id="trains" aria-hidden="true"></div>
+    <ol class="describer" id="describer" aria-label="Latest events"></ol>
+    <p class="sr" id="announce" aria-live="polite"></p>
+  </aside>
+</main>
+
+<div class="wrap">
+  <section class="timeline" id="timeline">
+    <h2 class="big" id="timeline-title">The run, to scale</h2>
+    <p class="summary" id="timeline-summary"></p>
+    <div class="chart" id="chart"></div>
+    <ul class="legend">
+      <li><i></i>rustc, in the Compiler Worker</li>
+      <li class="dynamic"><i></i>A build script, in a Dynamic Worker</li>
+      <li class="hit"><i></i>From Workers Cache</li>
+      <li class="r2"><i></i>From R2</li>
+      <li class="live"><i></i>Happening now</li>
+      <li class="run"><i></i>The program, in a Dynamic Worker</li>
+    </ul>
+  </section>
+
+  <section class="how" id="how">
+    <h2 class="big">How a run works</h2>
+    <p class="lede">Pressing Run sends the code in the editor to the playground Worker, which streams each step back to the panel as it happens.</p>
+    <ol class="steps">
+      <li><div>
+        <h3>Resolve dependencies</h3>
+        <p>The <code>[dependencies]</code> in the <code>---</code> block at the top of the snippet are resolved against the crates.io index the way Cargo does it: semver ranges, features, optional and renamed dependencies, and per-target dependencies. The versions picked are kept in Workers Cache for ten minutes.</p>
+      </div></li>
+      <li><div>
+        <h3>Build every crate in Workers</h3>
+        <p>Each crate is compiled by rustc in the Compiler Worker, several at a time, and kept in R2 under a hash of its source, features and dependencies, with Workers Cache in front. A build script is compiled into a program and run in a Dynamic Worker with Cargo’s environment; when it runs <code>rustc --version</code>, that call goes back to the Compiler Worker. Once every crate a snippet needs is built, they’re kept together, so the next run gets them in one lookup.</p>
+      </div></li>
+      <li><div>
+        <h3>Run proc macros in their own sandboxes</h3>
+        <p>rustc can’t load a proc macro as a shared library here, so each proc-macro crate becomes a WebAssembly module of its own. To expand <code>#[derive(Serialize)]</code>, rustc pauses (JSPI), the macro runs in its module’s Dynamic Worker with no network, and the macro’s questions about the code come back to rustc over RPC.</p>
+      </div></li>
+      <li><div>
+        <h3>Compile and link the snippet</h3>
+        <p>rustc 1.98.1 itself, compiled to <code>wasm32-unknown-emscripten</code> as 53 MiB of WebAssembly, compiles the snippet. On its own, a snippet links with wasm-ld inside rustc; with crates, the Linker Worker links it, so the crates’ object code never has to fit in the compiler’s memory. A snippet built the same way before comes from the cache; change anything and it compiles again.</p>
+      </div></li>
+      <li><div>
+        <h3>Run it in a sandbox</h3>
+        <p>The program runs in a fresh Dynamic Worker with no network access, on a shared Emscripten runtime. Standard input, arguments, exit codes and panics behave as they do natively. It runs every time, even when its build came from the cache.</p>
+      </div></li>
+    </ol>
+  </section>
+
+  <section class="platform" id="platform">
+    <h2 class="big">Built on the Workers platform</h2>
+    <p class="lede">Nothing here runs outside Cloudflare. Each part of a compiler toolchain maps onto a Workers product.</p>
+    <dl class="products">
+      <dt>Rust on the Emscripten target<span>wasm32-unknown-emscripten</span></dt>
+      <dd>rustc, its linker, and every program it builds are compiled for the Emscripten target, the target Rust Workers build on. A program gets a real libc, a filesystem, stdin and stdout, panics that unwind, and exit codes, without WASI.</dd>
+      <dt>Dynamic Workers<span>worker_loaders</span></dt>
+      <dd>Every program, every build script and every proc macro runs in an isolate created on demand from the code that was just compiled, with <code>globalOutbound: null</code>, so untrusted code from crates.io never touches the network.</dd>
+      <dt>Service bindings and RPC<span>services, WorkerEntrypoint</span></dt>
+      <dd>The playground, the compiler and the linker are separate Workers, each with its own memory. They call each other over RPC, including callbacks: a proc macro’s questions about the code flow back into the rustc that’s waiting on it.</dd>
+      <dt>Workers Cache<span>cache, exports</span></dt>
+      <dd>In front of R2, close to whoever pressed Run: resolved versions, compiled crates, all of a snippet’s dependencies in one response, and the snippet’s own build. Hits come back without running any code.</dd>
+      <dt>R2<span>r2_buckets</span></dt>
+      <dd>The crates.io index, downloaded crates, every compiled crate and every compiled snippet, keyed by a hash of everything that went into it. A crate is compiled once; after that, any snippet that needs it gets it in milliseconds.</dd>
+      <dt>JavaScript Promise Integration<span>WebAssembly.Suspending</span></dt>
+      <dd>rustc is synchronous code, but it can pause mid-compile while a macro runs in another Worker, then pick up where it left off. Programs pause the same way while a child process runs, which is how a build script’s <code>rustc --version</code> reaches the compiler.</dd>
+      <dt>Streaming responses<span>TransformStream</span></dt>
+      <dd>The panel above is fed by the run itself: the playground Worker writes each step to the response as it happens, one line of JSON at a time.</dd>
+      <dt>Workers Static Assets<span>assets</span></dt>
+      <dd>This page, whose editor is Monaco, the editor inside VS Code. And std’s crate metadata, 75 MiB that doesn’t fit in the compiler’s bundle beside rustc: the compiler’s own assets, as compressed pages that only it reads.</dd>
+    </dl>
+  </section>
+
+  <section class="changes" id="changes">
+    <div>
+      <h2 class="big">What it took</h2>
+      <p>rustc wasn’t written to run on WebAssembly. Putting it on the Emscripten target took seven small patches to the compiler, one to std, and two fixes in the runtime, each small enough to read in one sitting.</p>
+    </div>
+    <ol class="manifest">
+      <li><span class="file">rustc 0001</span><span class="what">Run the compiler without threads on hosts that lack them<span>The front end runs inline, and codegen waits for its join.</span></span></li>
+      <li><span class="file">rustc 0002</span><span class="what">Link with wasm-ld in-process on WebAssembly hosts<span>There are no processes to spawn a linker in.</span></span></li>
+      <li><span class="file">rustc 0003</span><span class="what">Allow wasm-ld as the linker for Emscripten targets<span>With the arguments emcc would have passed it.</span></span></li>
+      <li><span class="file">rustc 0004</span><span class="what">Build rustc_driver as an rlib too<span>Emscripten has no shared libraries, so rustc links statically.</span></span></li>
+      <li><span class="file">rustc 0005</span><span class="what">Give Emscripten hosts a default sysroot<span>rustc finds its sysroot with dladdr, which isn’t available.</span></span></li>
+      <li><span class="file">rustc 0006</span><span class="what">Run proc macros out of process on Emscripten hosts<span>The bridge protocol is unchanged; only its byte buffers cross over.</span></span></li>
+      <li><span class="file">rustc 0007</span><span class="what">Read crate metadata a page at a time on Emscripten hosts<span>Mapping a file copies all of it there, and std’s metadata alone is 75 MiB.</span></span></li>
+      <li><span class="file">std</span><span class="what">Spawn processes with posix_spawn on Emscripten<span>Emscripten has no fork. With the matching libc bindings.</span></span></li>
+      <li><span class="file">runtime</span><span class="what">Hand child processes to the host, and let pipes reach EOF<span>That’s how a build script’s <code>rustc</code> call reaches the compiler Worker.</span></span></li>
+    </ol>
+  </section>
+
+  <footer>rustc 1.98.1 for wasm32-unknown-emscripten, on Cloudflare Workers. Programs run in Dynamic Workers without network access.</footer>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,20 @@
+diff --git a/src/read/mod.rs b/src/read/mod.rs
+index 11d2e73..dc3f136 100644
+--- a/src/read/mod.rs
++++ b/src/read/mod.rs
+@@ -156,6 +156,7 @@ impl<T> ReadError<T> for Option<T> {
+ #[cfg(all(
+     unix,
+     not(target_os = "macos"),
++    not(all(feature = "wasm", target_arch = "wasm32")),
+     target_pointer_width = "32",
+     feature = "elf"
+ ))]
+@@ -165,6 +166,7 @@ pub type NativeFile<'data, R = &'data [u8]> = elf::ElfFile32<'data, crate::endia
+ #[cfg(all(
+     unix,
+     not(target_os = "macos"),
++    not(all(feature = "wasm", target_arch = "wasm32")),
+     target_pointer_width = "64",
+     feature = "elf"
+ ))]

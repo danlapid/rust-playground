@@ -1,0 +1,244 @@
+From d26193b1a50471e7df1c11ac4b2c912ac9af1c13 Mon Sep 17 00:00:00 2001
+From: rust-playground <rp@localhost>
+Date: Fri, 16 Oct 2026 19:37:19 -0400
+Subject: [PATCH 6/7] Run proc macros out of process on Emscripten hosts
+
+rustc compiled to Emscripten cannot dlopen proc-macro crates. Instead, a
+proc-macro crate built for Emscripten is compiled to an object and
+metadata, and the host links it into a WebAssembly module of its own.
+The 'dylib' that dependents load is the crate's metadata; its clients are
+trampolines that hand the bridge's buffers to the host, which runs the
+macro elsewhere and calls back into rustc for each bridge request.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+---
+ compiler/rustc_metadata/src/host_dylib.rs |  12 +++
+ compiler/rustc_metadata/src/locator.rs    |   3 +
+ compiler/rustc_session/src/output.rs      |   6 ++
+ compiler/rustc_symbol_mangling/Cargo.toml |   1 +
+ compiler/rustc_symbol_mangling/src/lib.rs |   5 +
+ library/proc_macro/src/bridge/mod.rs      |   2 +
+ library/proc_macro/src/bridge/remote.rs   | 113 ++++++++++++++++++++++
+ 7 files changed, 142 insertions(+)
+ create mode 100644 library/proc_macro/src/bridge/remote.rs
+
+diff --git a/compiler/rustc_metadata/src/host_dylib.rs b/compiler/rustc_metadata/src/host_dylib.rs
+index 9bd2a57f..8be7610f 100644
+--- a/compiler/rustc_metadata/src/host_dylib.rs
++++ b/compiler/rustc_metadata/src/host_dylib.rs
+@@ -123,6 +123,7 @@ pub unsafe fn load_symbol_from_dylib<T: Copy>(
+     Ok(*sym)
+ }
+ 
++#[cfg(not(target_os = "emscripten"))]
+ pub(crate) fn dlsym_proc_macros(
+     path: &Path,
+     stable_crate_id: StableCrateId,
+@@ -145,3 +146,14 @@ pub(crate) fn dlsym_proc_macros(
+         }
+     }
+ }
++
++/// On Emscripten hosts, proc macros are WebAssembly modules that the host runs
++/// elsewhere (see `rustc_proc_macro::bridge::remote`).
++#[cfg(target_os = "emscripten")]
++pub(crate) fn dlsym_proc_macros(
++    path: &Path,
++    _stable_crate_id: StableCrateId,
++) -> Result<&'static [ProcMacroClient], DylibError> {
++    let display = path.display().to_string();
++    rustc_proc_macro::bridge::remote::clients(&display).map_err(|e| DylibError::DlOpen(display, e))
++}
+diff --git a/compiler/rustc_metadata/src/locator.rs b/compiler/rustc_metadata/src/locator.rs
+index f970be08..49acea2f 100644
+--- a/compiler/rustc_metadata/src/locator.rs
++++ b/compiler/rustc_metadata/src/locator.rs
+@@ -876,6 +876,9 @@ fn get_metadata_section<'p>(
+ 
+             rmeta
+         }
++        // On Emscripten hosts, proc macros run elsewhere, and the "dylib" a dependent
++        // sees is just the proc-macro crate's metadata (see `host_dylib`).
++        CrateFlavor::Dylib if cfg!(target_os = "emscripten") => get_rmeta_metadata_section(filename)?,
+         CrateFlavor::Dylib => {
+             let buf =
+                 loader.get_dylib_metadata(target, filename).map_err(MetadataError::LoadFailure)?;
+diff --git a/compiler/rustc_session/src/output.rs b/compiler/rustc_session/src/output.rs
+index 9224368f..bbde2d70 100644
+--- a/compiler/rustc_session/src/output.rs
++++ b/compiler/rustc_session/src/output.rs
+@@ -122,6 +122,12 @@ pub fn filename_for_input(
+ 
+ /// Checks if target supports crate_type as output
+ pub fn invalid_output_for_target(sess: &Session, crate_type: CrateType) -> bool {
++    // Proc macros for compilers that themselves run on Emscripten: the crate is
++    // compiled to an object and metadata, and the host links it into a module of its
++    // own (see `rustc_proc_macro::bridge::remote`).
++    if crate_type == CrateType::ProcMacro && sess.target.os == rustc_target::spec::Os::Emscripten {
++        return false;
++    }
+     if let CrateType::Cdylib | CrateType::Dylib | CrateType::ProcMacro = crate_type {
+         if !sess.target.dynamic_linking {
+             return true;
+diff --git a/compiler/rustc_symbol_mangling/Cargo.toml b/compiler/rustc_symbol_mangling/Cargo.toml
+index 1df8d641..31d944bf 100644
+--- a/compiler/rustc_symbol_mangling/Cargo.toml
++++ b/compiler/rustc_symbol_mangling/Cargo.toml
+@@ -14,5 +14,6 @@ rustc_hir = { path = "../rustc_hir" }
+ rustc_middle = { path = "../rustc_middle" }
+ rustc_session = { path = "../rustc_session" }
+ rustc_span = { path = "../rustc_span" }
++rustc_target = { path = "../rustc_target" }
+ tracing = "0.1"
+ # tidy-alphabetical-end
+diff --git a/compiler/rustc_symbol_mangling/src/lib.rs b/compiler/rustc_symbol_mangling/src/lib.rs
+index d6143721..cfceec6c 100644
+--- a/compiler/rustc_symbol_mangling/src/lib.rs
++++ b/compiler/rustc_symbol_mangling/src/lib.rs
+@@ -158,6 +158,11 @@ pub fn symbol_name_from_attrs<'tcx>(
+     if let Some(def_id) = def_id.as_local() {
+         if tcx.proc_macro_decls_static(()) == Some(def_id) {
+             let stable_crate_id = tcx.stable_crate_id(LOCAL_CRATE);
++            // Each proc-macro crate is linked into a module of its own on Emscripten,
++            // with an entry point that refers to this by name.
++            if tcx.sess.target.os == rustc_target::spec::Os::Emscripten {
++                return Some("__rustc_proc_macro_decls".to_owned());
++            }
+             return Some(rustc_session::generate_proc_macro_decls_symbol(stable_crate_id));
+         }
+     }
+diff --git a/library/proc_macro/src/bridge/mod.rs b/library/proc_macro/src/bridge/mod.rs
+index 8b60043f..b68e3a47 100644
+--- a/library/proc_macro/src/bridge/mod.rs
++++ b/library/proc_macro/src/bridge/mod.rs
+@@ -90,6 +90,8 @@ fn ts_into_trees(
+ mod buffer;
+ #[deny(unsafe_code)]
+ pub mod client;
++#[cfg(target_os = "emscripten")]
++pub mod remote;
+ #[allow(unsafe_code)]
+ mod closure;
+ #[forbid(unsafe_code)]
+diff --git a/library/proc_macro/src/bridge/remote.rs b/library/proc_macro/src/bridge/remote.rs
+new file mode 100644
+index 00000000..59d14326
+--- /dev/null
++++ b/library/proc_macro/src/bridge/remote.rs
+@@ -0,0 +1,113 @@
++//! Proc macros that run outside of the compiler's process, on hosts that cannot load
++//! them as shared libraries (rustc compiled to Emscripten, e.g. in a Cloudflare Worker).
++//!
++//! Each proc-macro crate is its own WebAssembly module that the host runs elsewhere. A
++//! client here is a trampoline for one macro in such a module: it hands the bridge's
++//! input to the host, and serves the bridge requests that come back while the host
++//! waits for the macro's output (the host suspends rustc meanwhile, with JSPI). The
++//! bridge protocol is unchanged; only its byte buffers cross over.
++
++#![allow(unsafe_code)] // The host's imports, and the exports it calls into.
++
++use std::cell::Cell;
++use std::sync::atomic::{AtomicUsize, Ordering};
++
++use super::buffer::Buffer;
++use super::client::Client;
++use super::closure::Closure;
++use super::BridgeConfig;
++
++// Provided by the host's JS (toolchain/rustc/proc-macro-host.js).
++unsafe extern "C" {
++    /// Registers the proc-macro crate at `path` for macros `first_slot..`; returns how
++    /// many macros it has, or -1 if the host does not know it.
++    fn __rustc_proc_macro_host_load(path: *const u8, path_len: usize, first_slot: usize) -> isize;
++    /// Runs the macro in `slot` on `input`. Calls back into `__rustc_proc_macro_dispatch`
++    /// for each bridge request, writes the output with `__rustc_proc_macro_alloc`, and
++    /// returns its length.
++    fn __rustc_proc_macro_host_run(slot: usize, input: *const u8, input_len: usize, force_show_panics: bool) -> usize;
++}
++
++const SLOTS: usize = 256;
++static NEXT_SLOT: AtomicUsize = AtomicUsize::new(0);
++
++thread_local! {
++    /// The server's dispatcher for the macro that is running.
++    static DISPATCH: Cell<*mut Closure<'static>> = const { Cell::new(std::ptr::null_mut()) };
++    /// What the host writes into: replies to `run` and requests to dispatch.
++    static INBOX: Cell<Vec<u8>> = const { Cell::new(Vec::new()) };
++    /// The last reply from the dispatcher, for the host to read.
++    static OUTBOX: Cell<Option<Buffer>> = const { Cell::new(None) };
++}
++
++#[unsafe(no_mangle)]
++extern "C" fn __rustc_proc_macro_alloc(len: usize) -> *mut u8 {
++    let mut v = vec![0; len];
++    let ptr = v.as_mut_ptr();
++    INBOX.set(v);
++    ptr
++}
++
++/// Serves a bridge request from the inbox; returns the reply's length. The reply is at
++/// `__rustc_proc_macro_reply()`.
++#[unsafe(no_mangle)]
++extern "C" fn __rustc_proc_macro_dispatch() -> usize {
++    let dispatch = DISPATCH.get();
++    assert!(!dispatch.is_null(), "bridge request with no proc macro running");
++    let reply = unsafe { (*dispatch).call(Buffer::from(INBOX.take())) };
++    let len = reply.len();
++    OUTBOX.set(Some(reply));
++    len
++}
++
++#[unsafe(no_mangle)]
++extern "C" fn __rustc_proc_macro_reply() -> *const u8 {
++    let reply = OUTBOX.take();
++    let ptr = reply.as_ref().map_or(std::ptr::null(), |b| b.as_ptr());
++    OUTBOX.set(reply);
++    ptr
++}
++
++fn run_remote(slot: usize, config: BridgeConfig<'_>) -> Buffer {
++    let BridgeConfig { input, mut dispatch, force_show_panics } = config;
++    let outer = DISPATCH.replace(&mut dispatch as *mut Closure<'_> as *mut Closure<'static>);
++    let len = unsafe { __rustc_proc_macro_host_run(slot, input.as_ptr(), input.len(), force_show_panics) };
++    DISPATCH.set(outer);
++    OUTBOX.set(None);
++    let output = INBOX.take();
++    assert_eq!(output.len(), len);
++    Buffer::from(output)
++}
++
++extern "C" fn trampoline<const SLOT: usize>(config: BridgeConfig<'_>) -> Buffer {
++    run_remote(SLOT, config)
++}
++
++macro_rules! trampolines {
++    ($($n:literal)*) => { [$(Client { run: trampoline::<$n> }),*] };
++}
++
++static CLIENTS: [Client; SLOTS] = trampolines!(
++    0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31
++    32 33 34 35 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63
++    64 65 66 67 68 69 70 71 72 73 74 75 76 77 78 79 80 81 82 83 84 85 86 87 88 89 90 91 92 93 94 95
++    96 97 98 99 100 101 102 103 104 105 106 107 108 109 110 111 112 113 114 115 116 117 118 119 120 121 122 123 124 125 126 127
++    128 129 130 131 132 133 134 135 136 137 138 139 140 141 142 143 144 145 146 147 148 149 150 151 152 153 154 155 156 157 158 159
++    160 161 162 163 164 165 166 167 168 169 170 171 172 173 174 175 176 177 178 179 180 181 182 183 184 185 186 187 188 189 190 191
++    192 193 194 195 196 197 198 199 200 201 202 203 204 205 206 207 208 209 210 211 212 213 214 215 216 217 218 219 220 221 222 223
++    224 225 226 227 228 229 230 231 232 233 234 235 236 237 238 239 240 241 242 243 244 245 246 247 248 249 250 251 252 253 254 255
++);
++
++/// The clients for the proc-macro crate at `path`, as `dlsym` would give them.
++pub fn clients(path: &str) -> Result<&'static [Client], String> {
++    let first = NEXT_SLOT.load(Ordering::Relaxed);
++    let count = unsafe { __rustc_proc_macro_host_load(path.as_ptr(), path.len(), first) };
++    let Ok(count) = usize::try_from(count) else {
++        return Err(": the host has no proc-macro module for this crate".to_owned());
++    };
++    if first + count > SLOTS {
++        return Err(format!(": more than {SLOTS} proc macros"));
++    }
++    NEXT_SLOT.store(first + count, Ordering::Relaxed);
++    Ok(&CLIENTS[first..first + count])
++}
+-- 
+2.56.0
+

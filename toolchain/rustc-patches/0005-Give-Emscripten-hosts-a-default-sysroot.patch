@@ -1,0 +1,43 @@
+From b652342d4ac60de8e4ab01f43ead8f8668a86877 Mon Sep 17 00:00:00 2001
+From: rust-playground <rp@localhost>
+Date: Fri, 16 Oct 2026 19:10:22 -0400
+Subject: [PATCH 5/7] Give Emscripten hosts a default sysroot
+
+There is no dladdr() to find librustc_driver with: the compiler is a single
+module. Report /lib as its location, so the default sysroot is /.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+---
+ compiler/rustc_session/src/filesearch.rs | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/compiler/rustc_session/src/filesearch.rs b/compiler/rustc_session/src/filesearch.rs
+index bf1e1f5f..a671bee2 100644
+--- a/compiler/rustc_session/src/filesearch.rs
++++ b/compiler/rustc_session/src/filesearch.rs
+@@ -57,7 +57,7 @@ pub fn make_target_bin_path(sysroot: &Path, target_triple: &str) -> PathBuf {
+     sysroot.join(rustlib_path).join("bin")
+ }
+ 
+-#[cfg(unix)]
++#[cfg(all(unix, not(target_os = "emscripten")))]
+ fn current_dll_path() -> Result<PathBuf, String> {
+     use std::sync::OnceLock;
+ 
+@@ -184,6 +184,13 @@ fn current_dll_path() -> Result<PathBuf, String> {
+     Err("current_dll_path is not supported on WASI".to_string())
+ }
+ 
++/// Emscripten has no shared libraries to locate: the compiler is a single module, so say
++/// it lives in `/lib`, making the default sysroot `/`. Hosts pass `--sysroot` otherwise.
++#[cfg(target_os = "emscripten")]
++fn current_dll_path() -> Result<PathBuf, String> {
++    Ok(PathBuf::from("/lib/librustc_driver.so"))
++}
++
+ /// This function checks if sysroot is found using env::args().next(), and if it
+ /// is not found, finds sysroot from current rustc_driver dll.
+ pub(crate) fn default_sysroot() -> PathBuf {
+-- 
+2.56.0
+

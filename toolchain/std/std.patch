@@ -1,0 +1,66 @@
+--- a/library/std/src/sys/process/unix/unix.rs
++++ b/library/std/src/sys/process/unix/unix.rs
+@@ -428,6 +428,8 @@
+         target_os = "illumos",
+         all(target_os = "linux", target_env = "gnu"),
+         all(target_os = "linux", target_env = "musl"),
++        // No fork(); the embedder provides posix_spawn, if anything.
++        target_os = "emscripten",
+         target_os = "nto",
+         target_os = "qnx",
+         target_vendor = "apple",
+@@ -448,6 +450,8 @@
+         target_os = "illumos",
+         all(target_os = "linux", target_env = "gnu"),
+         all(target_os = "linux", target_env = "musl"),
++        // No fork(); the embedder provides posix_spawn, if anything.
++        target_os = "emscripten",
+         target_os = "nto",
+         target_os = "qnx",
+         target_vendor = "apple",
+@@ -462,7 +466,9 @@
+         use core::sync::atomic::{Atomic, AtomicU8, Ordering};
+ 
+         use crate::mem::MaybeUninit;
+-        use crate::sys::{self, cvt_nz, on_broken_pipe_used};
++        #[cfg(not(target_os = "emscripten"))]
++        use crate::sys::on_broken_pipe_used;
++        use crate::sys::{self, cvt_nz};
+ 
+         if self.get_gid().is_some()
+             || self.get_uid().is_some()
+@@ -603,7 +609,11 @@
+         /// Some platforms can set a new working directory for a spawned process in the
+         /// `posix_spawn` path. This function looks up the function pointer for adding
+         /// such an action to a `posix_spawn_file_actions_t` struct.
+-        #[cfg(not(any(all(target_os = "linux", target_env = "musl"), target_os = "cygwin")))]
++        #[cfg(not(any(
++            all(target_os = "linux", target_env = "musl"),
++            target_os = "cygwin",
++            target_os = "emscripten"
++        )))]
+         fn get_posix_spawn_addchdir() -> Option<PosixSpawnAddChdirFn> {
+             use crate::sys::weak::weak;
+ 
+@@ -639,7 +649,11 @@
+         /// of the symbol at compile time or know about it upfront.
+         ///
+         /// Cygwin doesn't support weak symbol, so just link it.
+-        #[cfg(any(all(target_os = "linux", target_env = "musl"), target_os = "cygwin"))]
++        #[cfg(any(
++            all(target_os = "linux", target_env = "musl"),
++            target_os = "cygwin",
++            target_os = "emscripten"
++        ))]
+         fn get_posix_spawn_addchdir() -> Option<PosixSpawnAddChdirFn> {
+             // Our minimum required musl supports this function, so we can just use it.
+             Some(libc::posix_spawn_file_actions_addchdir_np)
+@@ -738,6 +752,8 @@
+             // If -Zon-broken-pipe is not used, reset SIGPIPE to SIG_DFL for backward compatibility.
+             //
+             // -Zon-broken-pipe is an opportunity to change the default here.
++            // (Emscripten has no signals.)
++            #[cfg(not(target_os = "emscripten"))]
+             if !on_broken_pipe_used() {
+                 let mut default_set = MaybeUninit::<libc::sigset_t>::uninit();
+                 cvt(sigemptyset(default_set.as_mut_ptr()))?;

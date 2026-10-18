@@ -1,0 +1,13 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "rust-playground-linker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // The sysroot is read through node:fs from /bundle, so it ships as additional modules
+  // rather than imports. `pnpm toolchain:stage` copies it into src/generated/.
+  "find_additional_modules": true,
+  "rules": [
+    { "type": "Data", "globs": ["generated/**/*.a", "generated/**/*.o", "generated/**/*.rlib", "generated/**/*.stub"], "fallthrough": false }
+  ]
+}

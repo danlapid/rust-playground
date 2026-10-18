@@ -1,0 +1,141 @@
+From 509e54ab01a042c95b9f5bc9a1dc18b18e48bd43 Mon Sep 17 00:00:00 2001
+From: rust-playground <rp@localhost>
+Date: Fri, 16 Oct 2026 18:31:00 -0400
+Subject: [PATCH 2/7] Link with wasm-ld in-process on WebAssembly hosts
+
+Hosts that cannot spawn processes run lld's wasm driver inside rustc_llvm, with
+its output captured so linker errors are reported as usual.
+---
+ compiler/rustc_codegen_ssa/src/back/link.rs | 46 +++++++++++++++++++++
+ compiler/rustc_llvm/build.rs                | 14 ++++++-
+ compiler/rustc_llvm/llvm-wrapper/LLD.cpp    | 22 ++++++++++
+ 3 files changed, 80 insertions(+), 2 deletions(-)
+ create mode 100644 compiler/rustc_llvm/llvm-wrapper/LLD.cpp
+
+diff --git a/compiler/rustc_codegen_ssa/src/back/link.rs b/compiler/rustc_codegen_ssa/src/back/link.rs
+index 3d09b7aa..f008915b 100644
+--- a/compiler/rustc_codegen_ssa/src/back/link.rs
++++ b/compiler/rustc_codegen_ssa/src/back/link.rs
+@@ -1801,6 +1801,47 @@ fn get_object_file_path(sess: &Session, name: &str, self_contained: bool) -> Pat
+     PathBuf::from(name)
+ }
+ 
++/// Runs wasm-ld inside rustc, on hosts that cannot spawn processes (rustc compiled to
++/// WebAssembly). The linker is built into rustc_llvm for these hosts.
++#[cfg(target_family = "wasm")]
++fn exec_linker_in_process(cmd: &Command) -> io::Result<Output> {
++    use std::ffi::{CString, c_char, c_int, c_void};
++    use std::os::unix::process::ExitStatusExt;
++
++    unsafe extern "C" {
++        fn LLVMRustRunLld(
++            argc: c_int,
++            argv: *const *const c_char,
++            ctx: *mut c_void,
++            write: unsafe extern "C" fn(*mut c_void, c_int, *const c_char, usize),
++        ) -> c_int;
++    }
++    unsafe extern "C" fn write(ctx: *mut c_void, stream: c_int, data: *const c_char, len: usize) {
++        let output = unsafe { &mut *(ctx as *mut Output) };
++        let data = unsafe { std::slice::from_raw_parts(data as *const u8, len) };
++        if stream == 1 { &mut output.stdout } else { &mut output.stderr }.extend_from_slice(data);
++    }
++
++    let command = cmd.command();
++    let args = std::iter::once(command.get_program())
++        .chain(command.get_args())
++        .map(|arg| CString::new(arg.as_encoded_bytes()).map_err(io::Error::other))
++        .collect::<io::Result<Vec<_>>>()?;
++    let argv = args.iter().map(|arg| arg.as_ptr()).collect::<Vec<_>>();
++    let mut output =
++        Output { status: ExitStatusExt::from_raw(0), stdout: Vec::new(), stderr: Vec::new() };
++    let code = unsafe {
++        LLVMRustRunLld(
++            argv.len() as c_int,
++            argv.as_ptr(),
++            &mut output as *mut Output as *mut c_void,
++            write,
++        )
++    };
++    output.status = ExitStatusExt::from_raw((code & 0xff) << 8);
++    Ok(output)
++}
++
+ fn exec_linker(
+     sess: &Session,
+     cmd: &Command,
+@@ -1808,6 +1849,11 @@ fn exec_linker(
+     flavor: LinkerFlavor,
+     tmpdir: &Path,
+ ) -> io::Result<Output> {
++    #[cfg(target_family = "wasm")]
++    if let LinkerFlavor::WasmLld(Cc::No) = flavor {
++        return exec_linker_in_process(cmd);
++    }
++
+     // When attempting to spawn the linker we run a risk of blowing out the
+     // size limits for spawning a new process with respect to the arguments
+     // we pass on the command line.
+diff --git a/compiler/rustc_llvm/build.rs b/compiler/rustc_llvm/build.rs
+index 5be8bd46..632145ea 100644
+--- a/compiler/rustc_llvm/build.rs
++++ b/compiler/rustc_llvm/build.rs
+@@ -309,8 +309,13 @@ fn main() {
+         .file("llvm-wrapper/RustWrapper.cpp")
+         .file("llvm-wrapper/CoverageMappingWrapper.cpp")
+         .file("llvm-wrapper/SymbolWrapper.cpp")
+-        .file("llvm-wrapper/Linker.cpp")
+-        .cpp(true)
++        .file("llvm-wrapper/Linker.cpp");
++    // rustc compiled to WebAssembly cannot spawn a linker; it runs wasm-ld in-process.
++    let in_process_lld = target.starts_with("wasm32");
++    if in_process_lld {
++        cfg.file("llvm-wrapper/LLD.cpp");
++    }
++    cfg.cpp(true)
+         .cpp_link_stdlib(None) // we handle this below
+         .compile("llvm-wrapper");
+ 
+@@ -430,6 +435,11 @@ fn main() {
+         };
+         println!("cargo:rustc-link-lib={kind}={name}");
+     }
++    if in_process_lld {
++        for name in ["lldWasm", "lldCommon", "LLVMOption"] {
++            println!("cargo:rustc-link-lib=static={name}");
++        }
++    }
+ 
+     // LLVM ldflags
+     //
+diff --git a/compiler/rustc_llvm/llvm-wrapper/LLD.cpp b/compiler/rustc_llvm/llvm-wrapper/LLD.cpp
+new file mode 100644
+index 00000000..5d1771be
+--- /dev/null
++++ b/compiler/rustc_llvm/llvm-wrapper/LLD.cpp
+@@ -0,0 +1,22 @@
++// In-process wasm-ld, for hosts that cannot spawn a linker process (rustc compiled to
++// WebAssembly, e.g. running in a Cloudflare Worker). Only built for such hosts.
++#include "lld/Common/Driver.h"
++#include "llvm/Support/raw_ostream.h"
++
++#include <string>
++
++LLD_HAS_DRIVER(wasm)
++
++extern "C" int LLVMRustRunLld(int Argc, const char **Argv, void *Ctx,
++                              void (*Write)(void *Ctx, int Stream,
++                                            const char *Data, size_t Len)) {
++  std::string Out, Err;
++  llvm::raw_string_ostream OutOS(Out), ErrOS(Err);
++  lld::Result R = lld::lldMain(llvm::ArrayRef<const char *>(Argv, Argc), OutOS,
++                               ErrOS, {{lld::Wasm, &lld::wasm::link}});
++  OutOS.flush();
++  ErrOS.flush();
++  Write(Ctx, 1, Out.data(), Out.size());
++  Write(Ctx, 2, Err.data(), Err.size());
++  return R.retCode;
++}
+-- 
+2.56.0
+

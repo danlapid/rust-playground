@@ -1,0 +1,87 @@
+--- a/src/unix/linux_like/emscripten/mod.rs
++++ b/src/unix/linux_like/emscripten/mod.rs
+@@ -45,6 +45,24 @@
+ }
+ 
+ s! {
++    // As in musl, which Emscripten's libc is.
++    pub struct posix_spawn_file_actions_t {
++        __pad0: Padding<[c_int; 2]>,
++        __actions: *mut c_void,
++        __pad: Padding<[c_int; 16]>,
++    }
++
++    pub struct posix_spawnattr_t {
++        __flags: c_int,
++        __pgrp: crate::pid_t,
++        __def: crate::sigset_t,
++        __mask: crate::sigset_t,
++        __prio: c_int,
++        __pol: c_int,
++        __fn: *mut c_void,
++        __pad: Padding<[c_char; 60]>,
++    }
++
+     pub struct glob_t {
+         pub gl_pathc: size_t,
+         pub gl_pathv: *mut *mut c_char,
+@@ -1328,7 +1346,59 @@
+     }
+ }
+ 
++pub const POSIX_SPAWN_RESETIDS: c_int = 0x01;
++pub const POSIX_SPAWN_SETPGROUP: c_int = 0x02;
++pub const POSIX_SPAWN_SETSIGDEF: c_int = 0x04;
++pub const POSIX_SPAWN_SETSIGMASK: c_int = 0x08;
++pub const POSIX_SPAWN_SETSCHEDPARAM: c_int = 0x10;
++pub const POSIX_SPAWN_SETSCHEDULER: c_int = 0x20;
++
+ extern "C" {
++    // Emscripten has no fork(); posix_spawn is for the embedder to provide.
++    pub fn posix_spawn(
++        pid: *mut crate::pid_t,
++        path: *const c_char,
++        file_actions: *const crate::posix_spawn_file_actions_t,
++        attrp: *const crate::posix_spawnattr_t,
++        argv: *const *mut c_char,
++        envp: *const *mut c_char,
++    ) -> c_int;
++    pub fn posix_spawnp(
++        pid: *mut crate::pid_t,
++        file: *const c_char,
++        file_actions: *const crate::posix_spawn_file_actions_t,
++        attrp: *const crate::posix_spawnattr_t,
++        argv: *const *mut c_char,
++        envp: *const *mut c_char,
++    ) -> c_int;
++    pub fn posix_spawnattr_init(attr: *mut posix_spawnattr_t) -> c_int;
++    pub fn posix_spawnattr_destroy(attr: *mut posix_spawnattr_t) -> c_int;
++    pub fn posix_spawnattr_setsigdefault(
++        attr: *mut posix_spawnattr_t,
++        default: *const crate::sigset_t,
++    ) -> c_int;
++    pub fn posix_spawnattr_setsigmask(
++        attr: *mut posix_spawnattr_t,
++        default: *const crate::sigset_t,
++    ) -> c_int;
++    pub fn posix_spawnattr_setflags(attr: *mut posix_spawnattr_t, flags: c_short) -> c_int;
++    pub fn posix_spawnattr_setpgroup(attr: *mut posix_spawnattr_t, flags: crate::pid_t) -> c_int;
++    pub fn posix_spawn_file_actions_init(actions: *mut posix_spawn_file_actions_t) -> c_int;
++    pub fn posix_spawn_file_actions_destroy(actions: *mut posix_spawn_file_actions_t) -> c_int;
++    pub fn posix_spawn_file_actions_addclose(
++        actions: *mut posix_spawn_file_actions_t,
++        fd: c_int,
++    ) -> c_int;
++    pub fn posix_spawn_file_actions_adddup2(
++        actions: *mut posix_spawn_file_actions_t,
++        fd: c_int,
++        newfd: c_int,
++    ) -> c_int;
++    pub fn posix_spawn_file_actions_addchdir_np(
++        actions: *mut posix_spawn_file_actions_t,
++        path: *const c_char,
++    ) -> c_int;
++
+     pub fn getrlimit(resource: c_int, rlim: *mut crate::rlimit) -> c_int;
+     pub fn setrlimit(resource: c_int, rlim: *const crate::rlimit) -> c_int;
+     pub fn strerror_r(errnum: c_int, buf: *mut c_char, buflen: size_t) -> c_int;

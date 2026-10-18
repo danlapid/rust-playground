@@ -1,0 +1,672 @@
+From da4e440962a93952ac7090fa3d55046e01b9105e Mon Sep 17 00:00:00 2001
+From: rust-playground <rp@localhost>
+Date: Sat, 17 Oct 2026 00:47:22 -0400
+Subject: [PATCH 7/7] Read crate metadata a page at a time on Emscripten hosts
+
+There, mapping a file reads all of it into memory, so every crate a compilation
+loads would have all of its metadata in memory: about 60 MiB for std alone, of
+which compiling hello world decodes well under half. Instead, `.rmeta` files are
+read through `MemDecoder::new_paged`, which loads 16 KiB pages as decoding reaches
+them and keeps them for the crate's lifetime. With `-Zno-embed-metadata`, all
+metadata is in `.rmeta` files; rlibs then hold only object code, for the linker.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+---
+ compiler/rustc_metadata/src/locator.rs        |  76 +++++---
+ compiler/rustc_metadata/src/rmeta/decoder.rs  | 168 +++++++++++++++--
+ .../src/rmeta/def_path_hash_map.rs            |   6 +-
+ compiler/rustc_metadata/src/rmeta/table.rs    |  13 +-
+ compiler/rustc_serialize/src/opaque.rs        | 173 ++++++++++++++++--
+ 5 files changed, 362 insertions(+), 74 deletions(-)
+
+diff --git a/compiler/rustc_metadata/src/locator.rs b/compiler/rustc_metadata/src/locator.rs
+index 49acea2f..1e318850 100644
+--- a/compiler/rustc_metadata/src/locator.rs
++++ b/compiler/rustc_metadata/src/locator.rs
+@@ -823,6 +823,41 @@ fn get_metadata_section<'p>(
+     if !filename.exists() {
+         return Err(MetadataError::NotPresent(filename));
+     }
++    // On Emscripten hosts, mapping a file reads all of it, so metadata is read a page at a
++    // time instead. (There, proc macros run elsewhere, and the "dylib" a dependent sees is
++    // just the proc-macro crate's metadata: see `host_dylib`.)
++    let blob = if cfg!(target_os = "emscripten")
++        && matches!(flavor, CrateFlavor::Rmeta | CrateFlavor::Dylib)
++    {
++        get_paged_rmeta_metadata_section(filename)?
++    } else {
++        get_unpaged_metadata_section(target, flavor, filename, loader, crate_name)?
++    };
++    match blob.check_compatibility(cfg_version) {
++        Ok(()) => {
++            debug!("metadata blob read okay");
++            Ok(blob)
++        }
++        Err(None) => Err(MetadataError::LoadFailure(format!(
++            "invalid metadata version found: {}",
++            filename.display()
++        ))),
++        Err(Some(found_version)) => {
++            return Err(MetadataError::VersionMismatch {
++                expected_version: rustc_version(cfg_version),
++                found_version,
++            });
++        }
++    }
++}
++
++fn get_unpaged_metadata_section<'p>(
++    target: &Target,
++    flavor: CrateFlavor,
++    filename: &'p Path,
++    loader: &dyn MetadataLoader,
++    crate_name: Option<Symbol>,
++) -> Result<MetadataBlob, MetadataError<'p>> {
+     let raw_bytes = match flavor {
+         CrateFlavor::Rlib => {
+             loader.get_rlib_metadata(target, filename).map_err(MetadataError::LoadFailure)?
+@@ -876,9 +911,6 @@ fn get_metadata_section<'p>(
+ 
+             rmeta
+         }
+-        // On Emscripten hosts, proc macros run elsewhere, and the "dylib" a dependent
+-        // sees is just the proc-macro crate's metadata (see `host_dylib`).
+-        CrateFlavor::Dylib if cfg!(target_os = "emscripten") => get_rmeta_metadata_section(filename)?,
+         CrateFlavor::Dylib => {
+             let buf =
+                 loader.get_dylib_metadata(target, filename).map_err(MetadataError::LoadFailure)?;
+@@ -910,28 +942,24 @@ fn get_metadata_section<'p>(
+         }
+         CrateFlavor::Rmeta => get_rmeta_metadata_section(filename)?,
+     };
+-    let Ok(blob) = MetadataBlob::new(raw_bytes) else {
+-        return Err(MetadataError::LoadFailure(format!(
+-            "corrupt metadata encountered in {}",
+-            filename.display()
+-        )));
+-    };
+-    match blob.check_compatibility(cfg_version) {
+-        Ok(()) => {
+-            debug!("metadata blob read okay");
+-            Ok(blob)
+-        }
+-        Err(None) => Err(MetadataError::LoadFailure(format!(
+-            "invalid metadata version found: {}",
++    MetadataBlob::new(raw_bytes).map_err(|()| {
++        MetadataError::LoadFailure(format!("corrupt metadata encountered in {}", filename.display()))
++    })
++}
++
++fn get_paged_rmeta_metadata_section<'a, 'p>(
++    filename: &'p Path,
++) -> Result<MetadataBlob, MetadataError<'a>> {
++    let file = std::fs::File::open(filename).map_err(|_| {
++        MetadataError::LoadFailure(format!(
++            "failed to open rmeta metadata: '{}'",
+             filename.display()
+-        ))),
+-        Err(Some(found_version)) => {
+-            return Err(MetadataError::VersionMismatch {
+-                expected_version: rustc_version(cfg_version),
+-                found_version,
+-            });
+-        }
+-    }
++        ))
++    })?;
++    let len = file.metadata().map(|m| m.len() as usize).unwrap_or(0);
++    MetadataBlob::paged(file, 0, len).map_err(|()| {
++        MetadataError::LoadFailure(format!("corrupt metadata encountered in {}", filename.display()))
++    })
+ }
+ 
+ fn get_rmeta_metadata_section<'a, 'p>(filename: &'p Path) -> Result<OwnedSlice, MetadataError<'a>> {
+diff --git a/compiler/rustc_metadata/src/rmeta/decoder.rs b/compiler/rustc_metadata/src/rmeta/decoder.rs
+index bed2be51..71f9dbbc 100644
+--- a/compiler/rustc_metadata/src/rmeta/decoder.rs
++++ b/compiler/rustc_metadata/src/rmeta/decoder.rs
+@@ -1,16 +1,18 @@
+ // Decoding metadata from a single crate's metadata
+ 
++use std::fs::File;
++use std::io::{Read, Seek, SeekFrom};
+ use std::iter::TrustedLen;
+ use std::ops::{Deref, DerefMut};
+ use std::path::{Path, PathBuf};
+-use std::sync::{Arc, OnceLock};
++use std::sync::{Arc, Mutex, OnceLock};
+ use std::{io, mem};
+ 
+ pub(super) use cstore_impl::provide;
+ use rustc_ast as ast;
+ use rustc_data_structures::fingerprint::Fingerprint;
+-use rustc_data_structures::fx::FxIndexMap;
+-use rustc_data_structures::owned_slice::OwnedSlice;
++use rustc_data_structures::fx::{FxHashMap, FxIndexMap};
++use rustc_data_structures::owned_slice::{OwnedSlice, slice_owned};
+ use rustc_data_structures::sync::Lock;
+ use rustc_data_structures::unhash::UnhashMap;
+ use rustc_expand::base::{SyntaxExtension, SyntaxExtensionKind};
+@@ -27,7 +29,7 @@
+ use rustc_middle::ty::codec::TyDecoder;
+ use rustc_middle::{bug, implement_ty_decoder};
+ use rustc_proc_macro::bridge::client::Client as ProcMacroClient;
+-use rustc_serialize::opaque::MemDecoder;
++use rustc_serialize::opaque::{MAGIC_END_BYTES, MemDecoder, PagedBytes};
+ use rustc_serialize::{Decodable, Decoder};
+ use rustc_session::config::TargetModifier;
+ use rustc_session::config::mitigation_coverage::DeniedPartialMitigation;
+@@ -49,27 +51,148 @@
+ /// A reference to the raw binary version of crate metadata.
+ /// This struct applies [`MemDecoder`]'s validation when constructed
+ /// so that later constructions are guaranteed to succeed.
+-pub(crate) struct MetadataBlob(OwnedSlice);
++pub(crate) struct MetadataBlob(BlobBytes);
+ 
+-impl std::ops::Deref for MetadataBlob {
+-    type Target = [u8];
+-
+-    #[inline]
+-    fn deref(&self) -> &[u8] {
+-        &self.0[..]
+-    }
++enum BlobBytes {
++    Slice(OwnedSlice),
++    Paged(Box<PagedFile>),
+ }
+ 
+ impl MetadataBlob {
+     /// Runs the [`MemDecoder`] validation and if it passes, constructs a new [`MetadataBlob`].
+     pub(crate) fn new(slice: OwnedSlice) -> Result<Self, ()> {
+-        if MemDecoder::new(&slice, 0).is_ok() { Ok(Self(slice)) } else { Err(()) }
++        if MemDecoder::new(&slice, 0).is_ok() { Ok(Self(BlobBytes::Slice(slice))) } else { Err(()) }
++    }
++
++    /// The `len` bytes of metadata at `offset` in `file`, read as decoding reaches them
++    /// rather than all at once (see [`PagedBytes`]).
++    pub(crate) fn paged(file: File, offset: u64, len: usize) -> Result<Self, ()> {
++        PagedFile::new(file, offset, len).map(|paged| Self(BlobBytes::Paged(Box::new(paged))))
++    }
++
++    /// A decoder at `pos`, which passed validation in `new` or `paged`.
++    fn opaque(&self, pos: usize) -> MemDecoder<'_> {
++        match &self.0 {
++            BlobBytes::Slice(slice) => MemDecoder::new(slice, pos).unwrap(),
++            BlobBytes::Paged(paged) => MemDecoder::new_paged(&**paged, pos),
++        }
++    }
++
++    /// The number of bytes, not counting [`MAGIC_END_BYTES`].
++    fn len(&self) -> usize {
++        match &self.0 {
++            BlobBytes::Slice(slice) => slice.len() - MAGIC_END_BYTES.len(),
++            BlobBytes::Paged(paged) => paged.len(),
++        }
+     }
+ 
+-    /// Since this has passed the validation of [`MetadataBlob::new`], this returns bytes which are
+-    /// known to pass the [`MemDecoder`] validation.
+-    pub(crate) fn bytes(&self) -> &OwnedSlice {
+-        &self.0
++    fn starts_with(&self, prefix: &[u8]) -> bool {
++        let mut bytes = vec![0; prefix.len()];
++        prefix.len() <= self.len() && {
++            self.read(0, &mut bytes);
++            bytes == prefix
++        }
++    }
++
++    /// Copies the bytes at `pos` into `buf`.
++    pub(crate) fn read(&self, pos: usize, buf: &mut [u8]) {
++        match &self.0 {
++            BlobBytes::Slice(slice) => buf.copy_from_slice(&slice[pos..pos + buf.len()]),
++            BlobBytes::Paged(paged) => paged.read(pos, buf),
++        }
++    }
++
++    /// The `len` bytes at `pos`.
++    pub(crate) fn owned(&self, pos: usize, len: usize) -> OwnedSlice {
++        match &self.0 {
++            BlobBytes::Slice(slice) => slice.clone().slice(|blob| &blob[pos..pos + len]),
++            BlobBytes::Paged(paged) => {
++                let mut bytes = vec![0; len];
++                paged.read(pos, &mut bytes);
++                slice_owned(bytes, Deref::deref)
++            }
++        }
++    }
++}
++
++/// Crate metadata in a file, read a page at a time as decoding reaches it. On hosts where
++/// mapping a file reads all of it (Emscripten), this keeps a compilation from holding all
++/// of every dependency's metadata in memory, when it only decodes a fraction of it.
++struct PagedFile {
++    file: Mutex<File>,
++    /// Where the metadata starts in the file.
++    offset: u64,
++    /// Its length, not counting [`MAGIC_END_BYTES`].
++    len: usize,
++    pages: Box<[OnceLock<Box<[u8]>>]>,
++    /// Ranges that span pages, by position, which live as long as the pages do.
++    spans: Mutex<FxHashMap<usize, Box<[u8]>>>,
++}
++
++impl PagedFile {
++    const PAGE: usize = 16 * 1024;
++
++    fn new(file: File, offset: u64, len: usize) -> Result<Self, ()> {
++        let len = len.checked_sub(MAGIC_END_BYTES.len()).ok_or(())?;
++        let pages = (0..len.div_ceil(Self::PAGE)).map(|_| OnceLock::new()).collect();
++        let paged = PagedFile { file: Mutex::new(file), offset, len, pages, spans: Default::default() };
++        let mut magic = [0; MAGIC_END_BYTES.len()];
++        paged.read_file(len, &mut magic);
++        if magic == MAGIC_END_BYTES { Ok(paged) } else { Err(()) }
++    }
++
++    fn read_file(&self, pos: usize, buf: &mut [u8]) {
++        let mut file = self.file.lock().unwrap();
++        file.seek(SeekFrom::Start(self.offset + pos as u64))
++            .and_then(|_| file.read_exact(buf))
++            .unwrap_or_else(|e| panic!("failed to read crate metadata: {e}"));
++    }
++
++    /// Copies the bytes at `pos` into `buf`, through the pages they are on.
++    fn read(&self, mut pos: usize, mut buf: &mut [u8]) {
++        while !buf.is_empty() {
++            let (start, page) = self.page(pos);
++            let n = buf.len().min(start + page.len() - pos);
++            buf[..n].copy_from_slice(&page[pos - start..][..n]);
++            (pos, buf) = (pos + n, &mut buf[n..]);
++        }
++    }
++}
++
++impl PagedBytes for PagedFile {
++    fn len(&self) -> usize {
++        self.len
++    }
++
++    fn page(&self, pos: usize) -> (usize, &[u8]) {
++        let start = pos / Self::PAGE * Self::PAGE;
++        let page = self.pages[pos / Self::PAGE].get_or_init(|| {
++            let mut page = vec![0; Self::PAGE.min(self.len - start)];
++            self.read_file(start, &mut page);
++            page.into_boxed_slice()
++        });
++        (start, page)
++    }
++
++    fn bytes(&self, pos: usize, len: usize) -> &[u8] {
++        if len == 0 {
++            return &[];
++        }
++        let (start, page) = self.page(pos);
++        if pos - start + len <= page.len() {
++            return &page[pos - start..][..len];
++        }
++        let mut spans = self.spans.lock().unwrap();
++        let span = spans.entry(pos).or_default();
++        if span.len() < len {
++            let mut bytes = vec![0; len];
++            self.read(pos, &mut bytes);
++            *span = bytes.into_boxed_slice();
++        }
++        let span: *const [u8] = &span[..len];
++        // SAFETY: A boxed slice's bytes don't move when the box does, and they are only
++        // dropped with `self`: a span is replaced only by a longer one, which it is not.
++        unsafe { &*span }
+     }
+ }
+ 
+@@ -284,7 +407,7 @@ fn decoder(self, pos: usize) -> Self::Context {
+             // self-referential struct which is downright goofy because `MetadataBlob` is already
+             // self-referential. Probably `MemDecoder` should contain an `OwnedSlice`, but that
+             // demands a significant refactoring due to our crate graph.
+-            opaque: MemDecoder::new(self, pos).unwrap(),
++            opaque: self.opaque(pos),
+             lazy_state: LazyState::NoNode,
+             blob: self.blob(),
+         }
+@@ -375,6 +498,11 @@ pub(crate) fn blob(&self) -> &'a MetadataBlob {
+         self.blob
+     }
+ 
++    #[inline]
++    pub(crate) fn skip_bytes(&mut self, bytes: usize) {
++        self.opaque.skip(bytes)
++    }
++
+     fn decode_symbol_or_byte_symbol<S>(
+         &mut self,
+         new_from_index: impl Fn(u32) -> S,
+@@ -721,8 +849,8 @@ pub(crate) fn check_compatibility(
+     }
+ 
+     fn root_pos(&self) -> NonZero<usize> {
+-        let offset = METADATA_HEADER.len();
+-        let pos_bytes = self[offset..][..8].try_into().unwrap();
++        let mut pos_bytes = [0; 8];
++        self.read(METADATA_HEADER.len(), &mut pos_bytes);
+         let pos = u64::from_le_bytes(pos_bytes);
+         NonZero::new(pos as usize).unwrap()
+     }
+diff --git a/compiler/rustc_metadata/src/rmeta/def_path_hash_map.rs b/compiler/rustc_metadata/src/rmeta/def_path_hash_map.rs
+index 949d7630..8a80d8fd 100644
+--- a/compiler/rustc_metadata/src/rmeta/def_path_hash_map.rs
++++ b/compiler/rustc_metadata/src/rmeta/def_path_hash_map.rs
+@@ -45,12 +45,12 @@ impl<'a> Decodable<BlobDecodeContext<'a>> for DefPathHashMapRef<'static> {
+     fn decode(d: &mut BlobDecodeContext<'a>) -> DefPathHashMapRef<'static> {
+         let len = d.read_usize();
+         let pos = d.position();
+-        let o = d.blob().bytes().clone().slice(|blob| &blob[pos..pos + len]);
++        let o = d.blob().owned(pos, len);
+ 
+         // Although we already have the data we need via the `OwnedSlice`, we still need
+         // to advance the `DecodeContext`'s position so it's in a valid state after
+-        // the method. We use `read_raw_bytes()` for that.
+-        let _ = d.read_raw_bytes(len);
++        // the method.
++        d.skip_bytes(len);
+ 
+         let inner = odht::HashTable::from_raw_bytes(o).unwrap_or_else(|e| {
+             panic!("decode error: {e}");
+diff --git a/compiler/rustc_metadata/src/rmeta/table.rs b/compiler/rustc_metadata/src/rmeta/table.rs
+index 119978d4..4e053418 100644
+--- a/compiler/rustc_metadata/src/rmeta/table.rs
++++ b/compiler/rustc_metadata/src/rmeta/table.rs
+@@ -524,16 +524,9 @@ pub(super) fn get<'a, 'tcx, M: MetaBlob<'a>>(&self, metadata: M, i: I) -> T::Val
+ 
+         let width = self.width;
+         let start = self.position.get() + (width * i.index());
+-        let end = start + width;
+-        let bytes = &metadata.blob()[start..end];
+-
+-        if let Ok(fixed) = bytes.try_into() {
+-            FixedSizeEncoding::from_bytes(fixed)
+-        } else {
+-            let mut fixed = [0u8; N];
+-            fixed[..width].copy_from_slice(bytes);
+-            FixedSizeEncoding::from_bytes(&fixed)
+-        }
++        let mut fixed = [0u8; N];
++        metadata.blob().read(start, &mut fixed[..width]);
++        FixedSizeEncoding::from_bytes(&fixed)
+     }
+ 
+     /// Size of the table in entries, including possible gaps.
+diff --git a/compiler/rustc_serialize/src/opaque.rs b/compiler/rustc_serialize/src/opaque.rs
+index 4a644d3b..5005f08b 100644
+--- a/compiler/rustc_serialize/src/opaque.rs
++++ b/compiler/rustc_serialize/src/opaque.rs
+@@ -273,15 +273,35 @@ fn emit_raw_bytes(&mut self, s: &[u8]) {
+ // Decoder
+ // -----------------------------------------------------------------------------
+ 
++/// Bytes that a [`MemDecoder`] loads on demand, a page at a time, rather than all at once.
++/// For crate metadata on hosts where mapping a file reads all of it (Emscripten), where
++/// otherwise every crate's whole metadata would be in memory, though a compilation only
++/// decodes a fraction of it.
++pub trait PagedBytes: Send + Sync {
++    /// The number of bytes, not counting [`MAGIC_END_BYTES`].
++    fn len(&self) -> usize;
++    /// The page that contains `pos` (less than `len()`), and the position of its first byte.
++    fn page(&self, pos: usize) -> (usize, &[u8]);
++    /// The `len` bytes at `pos`, contiguous even if they span pages.
++    fn bytes(&self, pos: usize, len: usize) -> &[u8];
++}
++
++/// What a paged decoder's window points at before it has loaded a page.
++static NO_PAGE: [u8; 0] = [];
++
+ // Conceptually, `MemDecoder` wraps a `&[u8]` with a cursor into it that is always valid.
+ // This is implemented with three pointers, two which represent the original slice and a
+ // third that is our cursor.
+ // It is an invariant of this type that start <= current <= end.
+-// Additionally, the implementation of this type never modifies start and end.
++// Additionally, unless the decoder is paged, the implementation of this type never
++// modifies start and end. A paged decoder's start..end is the loaded page it is reading,
++// which begins at position `base`, or empty until a read loads one.
+ pub struct MemDecoder<'a> {
+     start: *const u8,
+     current: *const u8,
+     end: *const u8,
++    base: usize,
++    paged: Option<&'a dyn PagedBytes>,
+     _marker: PhantomData<&'a u8>,
+ }
+ 
+@@ -290,27 +310,65 @@ impl<'a> MemDecoder<'a> {
+     pub fn new(data: &'a [u8], position: usize) -> Result<MemDecoder<'a>, ()> {
+         let data = data.strip_suffix(MAGIC_END_BYTES).ok_or(())?;
+         let Range { start, end } = data.as_ptr_range();
+-        Ok(MemDecoder { start, current: data[position..].as_ptr(), end, _marker: PhantomData })
++        Ok(MemDecoder {
++            start,
++            current: data[position..].as_ptr(),
++            end,
++            base: 0,
++            paged: None,
++            _marker: PhantomData,
++        })
++    }
++
++    /// A decoder of bytes that are loaded as it reaches them.
++    #[inline]
++    pub fn new_paged(bytes: &'a dyn PagedBytes, position: usize) -> MemDecoder<'a> {
++        assert!(position <= bytes.len());
++        let none = NO_PAGE.as_ptr();
++        MemDecoder {
++            start: none,
++            current: none,
++            end: none,
++            base: position,
++            paged: Some(bytes),
++            _marker: PhantomData,
++        }
+     }
+ 
+     #[inline]
+     pub fn split_at(&self, position: usize) -> MemDecoder<'a> {
++        if let Some(paged) = self.paged {
++            return MemDecoder::new_paged(paged, position);
++        }
+         assert!(position <= self.len());
+         // SAFETY: We checked above that this offset is within the original slice
+         let current = unsafe { self.start.add(position) };
+-        MemDecoder { start: self.start, current, end: self.end, _marker: PhantomData }
++        MemDecoder {
++            start: self.start,
++            current,
++            end: self.end,
++            base: 0,
++            paged: None,
++            _marker: PhantomData,
++        }
+     }
+ 
+     #[inline]
+     pub fn len(&self) -> usize {
+-        // SAFETY: This recovers the length of the original slice, only using members we never modify.
+-        unsafe { self.end.offset_from_unsigned(self.start) }
++        match self.paged {
++            Some(paged) => paged.len(),
++            // SAFETY: This recovers the length of the original slice, only using members we never modify.
++            None => unsafe { self.end.offset_from_unsigned(self.start) },
++        }
+     }
+ 
+     #[inline]
+     pub fn remaining(&self) -> usize {
+-        // SAFETY: This type guarantees current <= end.
+-        unsafe { self.end.offset_from_unsigned(self.current) }
++        match self.paged {
++            Some(paged) => paged.len() - self.position(),
++            // SAFETY: This type guarantees current <= end.
++            None => unsafe { self.end.offset_from_unsigned(self.current) },
++        }
+     }
+ 
+     #[cold]
+@@ -319,11 +377,78 @@ fn decoder_exhausted() -> ! {
+         panic!("MemDecoder exhausted")
+     }
+ 
++    /// For a paged decoder, unloads the page, leaving the decoder at `pos`.
++    #[inline]
++    fn seek(&mut self, pos: usize) {
++        let none = NO_PAGE.as_ptr();
++        self.start = none;
++        self.current = none;
++        self.end = none;
++        self.base = pos;
++    }
++
++    /// For a paged decoder whose page is used up, loads the page at the current position.
++    #[cold]
++    #[inline(never)]
++    fn load_page(&mut self) {
++        let Some(paged) = self.paged else { Self::decoder_exhausted() };
++        let pos = self.position();
++        if pos >= paged.len() {
++            Self::decoder_exhausted();
++        }
++        let (page_pos, page) = paged.page(pos);
++        let Range { start, end } = page.as_ptr_range();
++        self.start = start;
++        self.end = end;
++        self.base = page_pos;
++        // SAFETY: The page contains `pos`.
++        self.current = unsafe { start.add(pos - page_pos) };
++    }
++
++    #[cold]
++    #[inline(never)]
++    fn peek_paged(&self) -> u8 {
++        let Some(paged) = self.paged else { Self::decoder_exhausted() };
++        let pos = self.position();
++        if pos >= paged.len() {
++            Self::decoder_exhausted();
++        }
++        let (page_pos, page) = paged.page(pos);
++        page[pos - page_pos]
++    }
++
++    #[cold]
++    #[inline(never)]
++    fn read_raw_bytes_paged(&mut self, bytes: usize) -> &'a [u8] {
++        let Some(paged) = self.paged else { Self::decoder_exhausted() };
++        let pos = self.position();
++        if bytes > paged.len() - pos {
++            Self::decoder_exhausted();
++        }
++        self.seek(pos + bytes);
++        paged.bytes(pos, bytes)
++    }
++
+     #[inline]
+     pub fn read_array<const N: usize>(&mut self) -> [u8; N] {
+         self.read_raw_bytes(N).try_into().unwrap()
+     }
+ 
++    /// Moves past `bytes` bytes without reading them.
++    #[inline]
++    pub fn skip(&mut self, bytes: usize) {
++        if bytes > self.remaining() {
++            Self::decoder_exhausted();
++        }
++        // SAFETY: This type guarantees current <= end.
++        if bytes <= unsafe { self.end.offset_from_unsigned(self.current) } {
++            // SAFETY: We just checked that this add is within the window.
++            self.current = unsafe { self.current.add(bytes) };
++        } else {
++            self.seek(self.position() + bytes);
++        }
++    }
++
+     /// While we could manually expose manipulation of the decoder position,
+     /// all current users of that method would need to reset the position later,
+     /// incurring the bounds check of set_position twice.
+@@ -334,23 +459,36 @@ pub fn with_position<F, T>(&mut self, pos: usize, func: F) -> T
+     {
+         struct SetOnDrop<'a, 'guarded> {
+             decoder: &'guarded mut MemDecoder<'a>,
++            start: *const u8,
+             current: *const u8,
++            end: *const u8,
++            base: usize,
+         }
+         impl Drop for SetOnDrop<'_, '_> {
+             fn drop(&mut self) {
++                self.decoder.start = self.start;
+                 self.decoder.current = self.current;
++                self.decoder.end = self.end;
++                self.decoder.base = self.base;
+             }
+         }
+ 
+         if pos >= self.len() {
+             Self::decoder_exhausted();
+         }
+-        let previous = self.current;
+-        // SAFETY: We just checked if this add is in-bounds above.
+-        unsafe {
+-            self.current = self.start.add(pos);
++        let (start, current, end, base) = (self.start, self.current, self.end, self.base);
++        // SAFETY: This type guarantees start <= end.
++        let window = unsafe { end.offset_from_unsigned(start) };
++        if pos >= base && pos - base < window {
++            // SAFETY: We just checked that this add is within the window. Unless the decoder
++            // is paged, the window is the whole slice, and we checked `pos` against it above.
++            unsafe {
++                self.current = start.add(pos - base);
++            }
++        } else {
++            self.seek(pos);
+         }
+-        let guard = SetOnDrop { current: previous, decoder: self };
++        let guard = SetOnDrop { start, current, end, base, decoder: self };
+         func(guard.decoder)
+     }
+ }
+@@ -378,7 +516,7 @@ fn read_u16(&mut self) -> u16 {
+     #[inline]
+     fn read_u8(&mut self) -> u8 {
+         if self.current == self.end {
+-            Self::decoder_exhausted();
++            self.load_page();
+         }
+         // SAFETY: This type guarantees current <= end, and we just checked current == end.
+         unsafe {
+@@ -400,8 +538,9 @@ fn read_i16(&mut self) -> i16 {
+ 
+     #[inline]
+     fn read_raw_bytes(&mut self, bytes: usize) -> &'a [u8] {
+-        if bytes > self.remaining() {
+-            Self::decoder_exhausted();
++        // SAFETY: This type guarantees current <= end.
++        if bytes > unsafe { self.end.offset_from_unsigned(self.current) } {
++            return self.read_raw_bytes_paged(bytes);
+         }
+         // SAFETY: We just checked if this range is in-bounds above.
+         unsafe {
+@@ -414,7 +553,7 @@ fn read_raw_bytes(&mut self, bytes: usize) -> &'a [u8] {
+     #[inline]
+     fn peek_byte(&self) -> u8 {
+         if self.current == self.end {
+-            Self::decoder_exhausted();
++            return self.peek_paged();
+         }
+         // SAFETY: This type guarantees current is inbounds or one-past-the-end, which is end.
+         // Since we just checked current == end, the current pointer must be inbounds.
+@@ -424,7 +563,7 @@ fn peek_byte(&self) -> u8 {
+     #[inline]
+     fn position(&self) -> usize {
+         // SAFETY: This type guarantees start <= current
+-        unsafe { self.current.offset_from_unsigned(self.start) }
++        self.base + unsafe { self.current.offset_from_unsigned(self.start) }
+     }
+ }
+ 
+-- 
+2.56.0
+

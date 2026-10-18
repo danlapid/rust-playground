@@ -1,0 +1,8 @@
+.build/
+dist/
+node_modules/
+.wrangler/
+workers/*/src/generated/
+workers/compiler/assets/
+# Written by scripts/wrangler-dev.mjs while a script runs.
+wrangler.script.json
