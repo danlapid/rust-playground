@@ -1,0 +1,21 @@
+src/cache.ts
+  s_3db16ee28df83b::t_83fdf1c2cd218b 75-76,80,82-87,109-110,117
+src/cargo/build.ts
+  s_3db16ee28df83b::t_c5b670624e1b96 550-555,558-569
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "58d66d2e635e3cbd1ddb1a99c0db57be97865c5b",
+  "prompts": {},
+  "sessions": {
+    "s_3db16ee28df83b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "54a6248a-ae8b-4830-891f-efa34adff216",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
