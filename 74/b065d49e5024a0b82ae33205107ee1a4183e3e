@@ -1,0 +1,35 @@
+README.md
+  s_3db16ee28df83b::t_2bce37407874d6 154,156-165,172,175-186
+scripts/warm-cache.mjs
+  s_3db16ee28df83b::t_94a7f2eaffde52 52-53,56-58,60,63,72
+workers/compiler/src/index.ts
+  s_3db16ee28df83b::t_f2008aa65697aa 1,201-205
+workers/compiler/src/subarray.ts
+  s_9f0df19802c61b::t_514aebb892ab24 1-35
+workers/compiler/wrangler.jsonc
+  s_3db16ee28df83b::t_fd7fd7e75f0eb6 20-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "74b065d49e5024a0b82ae33205107ee1a4183e3e",
+  "prompts": {},
+  "sessions": {
+    "s_3db16ee28df83b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "54a6248a-ae8b-4830-891f-efa34adff216",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_9f0df19802c61b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eeefdc48-ebee-4710-978a-0cc365630cd7",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
