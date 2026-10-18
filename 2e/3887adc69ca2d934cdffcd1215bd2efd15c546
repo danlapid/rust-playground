@@ -1,0 +1,201 @@
+test/link.test.ts
+  s_3db16ee28df83b::t_5e325912608333 1-39
+workers/compiler/src/index.ts
+  s_3db16ee28df83b::t_446338b45ae117 1-380
+src/events.ts
+  s_3db16ee28df83b::t_f320dffb3e53a5 1-21
+src/runner/entry.js
+  s_3db16ee28df83b::t_b9a538da68cb32 1-79
+toolchain/rustc-patches/0003-Allow-wasm-ld-as-the-linker-for-Emscripten-targets.patch
+  s_3db16ee28df83b::t_ae30b05d38187d 1-54
+pnpm-workspace.yaml
+  s_3db16ee28df83b::t_3faa78c1679583 1-5
+package.json
+  s_3db16ee28df83b::t_bc8fe5f2b6fcfb 1-37
+public/app/editor.js
+  s_3db16ee28df83b::t_16c8ca916ef5ee 1-96
+toolchain/rustc-patches/0005-Give-Emscripten-hosts-a-default-sysroot.patch
+  s_3db16ee28df83b::t_c44d27c9e9dc73 1-43
+toolchain/rustc-patches/0002-Link-with-wasm-ld-in-process-on-WebAssembly-hosts.patch
+  s_3db16ee28df83b::t_5499cddd403a53 1-141
+toolchain/build-lld.sh
+  s_3db16ee28df83b::t_46aa5f0f368357 1-65
+public/app/timeline.js
+  s_3db16ee28df83b::t_7add1da303477d 1-109
+LICENSE
+  s_3db16ee28df83b::t_c04c3eb32a7ce4 1-21
+workers/compiler/src/proc-macro/entry.js
+  s_3db16ee28df83b::t_787c22e22058f6 1-59
+toolchain/lld/wasm-ld-main.cpp
+  s_3db16ee28df83b::t_0e9f942c64ba10 1-11
+toolchain/try-rustc.mjs
+  s_3db16ee28df83b::t_235300b43f4da7 1-96
+workers/linker/src/index.ts
+  s_3db16ee28df83b::t_8309fa6bc051bd 1-72
+public/style.css
+  s_3db16ee28df83b::t_e1740d6ff8f387 1-290
+toolchain/rustc/proc-macro-host.js
+  s_3db16ee28df83b::t_5431365e330fc6 1-12
+toolchain/rustc/crates/libc-0.2.183.patch
+  s_3db16ee28df83b::t_48834eaa8024ad 1-22
+toolchain/std/libc-0.2.185.patch
+  s_3db16ee28df83b::t_a0a39173b2ebc8 1-87
+toolchain/build-runtime.mjs
+  s_3db16ee28df83b::t_8a9348f5ac0177 1-174
+test/fixtures/panic.rs
+  s_3db16ee28df83b::t_c18d36edde7bdb 1-7
+scripts/warm-cache.mjs
+  s_3db16ee28df83b::t_7c3c8244919129 1-54
+src/cargo/registry.ts
+  s_3db16ee28df83b::t_9c1fc187640bc6 1-102
+workers/compiler/src/generated.d.ts
+  s_3db16ee28df83b::t_6c02bcd5309dd0 1-16
+toolchain/rustc/remote-files.js
+  s_3db16ee28df83b::t_f7fc7a04349b49 1-48
+test/cargo.test.ts
+  s_3db16ee28df83b::t_25268c15441c70 1-149
+public/app/panel.js
+  s_3db16ee28df83b::t_e5e61f970d48c0 1-197
+toolchain/rustc/crates/object-0.37.3.patch
+  s_3db16ee28df83b::t_00bc38c7b46df7 1-20
+toolchain/rustc-patches/0004-Build-rustc_driver-as-an-rlib-too-for-hosts-without-.patch
+  s_3db16ee28df83b::t_ddb5cf2eca6d5e 1-28
+toolchain/std/std.patch
+  s_3db16ee28df83b::t_e7cde0ebb56ca1 1-66
+scripts/wrangler-dev.mjs
+  s_3db16ee28df83b::t_f94395c33e1602 1-58
+test/compile.test.ts
+  s_3db16ee28df83b::t_487e09a566eb1b 1-104
+toolchain/rustc-patches/0001-Run-the-compiler-without-threads-on-hosts-that-lack-.patch
+  s_3db16ee28df83b::t_67a005f60f3a57 1-328
+test/fixtures/hello.rs
+  s_3db16ee28df83b::t_25685a0a463369 1-13
+tsconfig.json
+  s_3db16ee28df83b::t_ac46fecbfc8da4 1-17
+test/workers.ts
+  s_3db16ee28df83b::t_08f0771a4425ef 1-74
+test/fixtures/exit.rs
+  s_3db16ee28df83b::t_c2cb066f20b141 1-4
+workers/linker/src/generated.d.ts
+  s_3db16ee28df83b::t_341020ef1e5c34 1-12
+.npmrc
+  s_3db16ee28df83b::t_d4afed3e5e4ec8 1
+public/index.html
+  s_3db16ee28df83b::t_1820f0dba1101c 1-158
+workers/compiler/src/paged.ts
+  s_3db16ee28df83b::t_1d0ff6d730b264 1-97
+worker-configuration.d.ts
+  s_3db16ee28df83b::t_12ed0506aa056a 1-16274
+src/cache.ts
+  s_3db16ee28df83b::t_032b11a091afe7 1-206
+toolchain/rustc-patches/0006-Run-proc-macros-out-of-process-on-Emscripten-hosts.patch
+  s_3db16ee28df83b::t_d44fe86293932b 1-244
+toolchain/proc-macro/shim.rs
+  s_3db16ee28df83b::t_fb8b2a47aadb60 1-138
+toolchain/runtime/process.c
+  s_3db16ee28df83b::t_fc586a826c2026 1-68
+public/recorded-run.json
+  s_3db16ee28df83b::t_d0a420ca2d7133 1
+src/cargo/crate.ts
+  s_3db16ee28df83b::t_13902c437b67d9 1-136
+src/index.ts
+  s_3db16ee28df83b::t_d8619be7147d8d 1-43
+public/app/diagnostics.js
+  s_3db16ee28df83b::t_59cce05688e9d9 1-26
+workers/compiler/src/subarray.ts
+  s_9f0df19802c61b::t_763afe20c3adc2 1-35
+public/app/run.js
+  s_3db16ee28df83b::t_c13532f24b8b46 1-119
+toolchain/import-rustc.mjs
+  s_3db16ee28df83b::t_b6d6246d96c3dc 1-25
+toolchain/build-std.sh
+  s_3db16ee28df83b::t_e78b093badd85d 1-70
+workers/linker/wrangler.jsonc
+  s_3db16ee28df83b::t_e72bcbbf15b399 1-13
+workers/compiler/wrangler.jsonc
+  s_3db16ee28df83b::t_63791e09f6ec3f 1-29
+toolchain/link-native.mjs
+  s_3db16ee28df83b::t_be0113ddde251a 1-41
+scripts/record-run.mjs
+  s_3db16ee28df83b::t_74ca69b91917e7 1-43
+toolchain/rustc-patches/0007-Read-crate-metadata-a-page-at-a-time-on-Emscripten-h.patch
+  s_3db16ee28df83b::t_a3fec25a164a47 1-672
+test/crates.test.ts
+  s_3db16ee28df83b::t_e7c5c54876eb73 1-82
+src/cargo/cfg.ts
+  s_3db16ee28df83b::t_016bd57f497c43 1-52
+public/examples.js
+  s_3db16ee28df83b::t_c4ee0d856c4409 1-139
+pnpm-lock.yaml
+  s_3db16ee28df83b::t_17739260fdc3a7 1-1643
+public/app/main.js
+  s_3db16ee28df83b::t_8eb8aee40b4ece 1-247
+src/cargo/build.ts
+  s_3db16ee28df83b::t_377f3a5f723990 1-560
+.gitignore
+  s_3db16ee28df83b::t_67f8a516d2524b 1-8
+test/fixtures/stdin.rs
+  s_3db16ee28df83b::t_e305095e86b680 1-6
+README.md
+  s_3db16ee28df83b::t_ddf4ac02fae2a9 1-204
+toolchain/runtime/process-host.js
+  s_3db16ee28df83b::t_583135742480d7 1-108
+toolchain/build-rustc.sh
+  s_3db16ee28df83b::t_a3cac8f0ec71de 1-130
+src/runner.ts
+  s_3db16ee28df83b::t_5a0f42226b819e 1-64
+test/global-setup.ts
+  s_3db16ee28df83b::t_29f8ad14013ca6 1-37
+scripts/deploy.mjs
+  s_3db16ee28df83b::t_9e660a76206027 1-38
+toolchain/rustc/emcc-link.sh
+  s_3db16ee28df83b::t_ddae69291e53e9 1-21
+toolchain/stage.mjs
+  s_3db16ee28df83b::t_683b2f2809abac 1-74
+src/pipeline.ts
+  s_3db16ee28df83b::t_fd13badb3e7d82 1-160
+test/run.test.ts
+  s_3db16ee28df83b::t_dc8c6495c11c81 1-44
+workers/compiler/src/sysroot.ts
+  s_3db16ee28df83b::t_19310f1fe5bcb9 1-92
+src/cargo/semver.ts
+  s_3db16ee28df83b::t_0b6c7b81db928b 1-109
+src/hash.ts
+  s_3db16ee28df83b::t_784a9f8e271da2 1-5
+src/cargo/resolve.ts
+  s_3db16ee28df83b::t_95d8ce5f7d109e 1-239
+wrangler.jsonc
+  s_3db16ee28df83b::t_196a9b4a0f5b8d 1-28
+vitest.config.ts
+  s_3db16ee28df83b::t_9cf5f0833192d9 1-17
+public/app/dom.js
+  s_3db16ee28df83b::t_d37d58663f9e93 1-12
+src/modules.d.ts
+  s_3db16ee28df83b::t_171cc4acc94a9e 1-24
+src/cargo/ar.ts
+  s_3db16ee28df83b::t_a7d1643b07c388 1-36
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "2e3887adc69ca2d934cdffcd1215bd2efd15c546",
+  "prompts": {},
+  "sessions": {
+    "s_3db16ee28df83b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "54a6248a-ae8b-4830-891f-efa34adff216",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    },
+    "s_9f0df19802c61b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "eeefdc48-ebee-4710-978a-0cc365630cd7",
+        "model": "unknown"
+      },
+      "human_author": "Dan Lapid <dlapid@cloudflare.com>"
+    }
+  }
+}
